@@ -13,7 +13,7 @@ import numpy as np
 
 from .give_global_waypoint import GiveGlobalWaypoint
 
-from custom_msgs.msg import LocalWaypointSetpoint
+from custom_msgs.msg import LocalWaypointSetpoint, ConveyLocalWaypointComplete
 
 
 class Controller(Node):
@@ -27,7 +27,7 @@ class Controller(Node):
         # falg of module
         self.path_planning_complete = False                    # flag whether path planning is complete 
         self.convey_local_waypoint_to_PF_start = False
-        self.convey_local_waypoint_to_PF_complete= False       # flag whether path planning convey to path following
+        self.convey_local_waypoint_is_complete= False       # flag whether path planning convey to path following
 
         #.. parameter - offboard control mode
         class prm_msg_off_con_mod:
@@ -169,6 +169,8 @@ class Controller(Node):
         # declare local waypoint publisher to path following
         self.local_waypoint_publisher = self.create_publisher(LocalWaypointSetpoint, '/local_waypoint_setpoint_to_PF', 10)
 
+        self.convey_local_waypoint_complete_subscriber  =   self.create_subscription(ConveyLocalWaypointComplete, '/convey_local_waypoint_complete', self.convey_local_waypoint_complete_call_back, 10) 
+
         period_offboard_control_mode =   0.2         # required about 5Hz for attitude control (proof that the external controller is healthy
         self.offboard_main_timer  =   self.create_timer(period_offboard_control_mode, self.offboard_control_main)
 
@@ -185,7 +187,6 @@ class Controller(Node):
         print("                                          ")
         print("=====   Path Planning Complete!!     =====")
         print("                                          ")
-        self.local_waypoint_publish()
 
     # publish local waypoint to path following
     def local_waypoint_publish(self):
@@ -195,8 +196,9 @@ class Controller(Node):
         msg.waypoint_y             = self.waypoint_y
         msg.waypoint_z             = self.waypoint_z
         self.local_waypoint_publisher.publish(msg)
-        # check point
-        self.convey_local_waypoint_to_PF_complete = True
+
+    def convey_local_waypoint_complete_call_back(self, msg):
+        self.convey_local_waypoint_is_complete = msg.convey_local_waypoint_is_complete
 
     def offboard_control_main(self):
 
@@ -216,22 +218,21 @@ class Controller(Node):
 
         # check initial position
         if self.initial_position_flag == True:
-
-            # check path planning complete
-            if self.path_planning_complete == False :
-                
-                # give global waypoint to path planning and path planning start
-                give_global_waypoint = GiveGlobalWaypoint()
-                give_global_waypoint.global_waypoint_publish(self.start_point, self.goal_point)
-                give_global_waypoint.destroy_node()
-            else:
-                pass
             
-            # check local waypoint convey to path following
-            if self.convey_local_waypoint_to_PF_complete == False :
+            if self.convey_local_waypoint_is_complete == False :
                 self.takeoff_and_go_initial_position()
 
-            # act path following if local waypoint conveyed to path following
+                # check path planning complete
+                if self.path_planning_complete == False :
+
+                    # give global waypoint to path planning and path planning start
+                    give_global_waypoint = GiveGlobalWaypoint()
+                    give_global_waypoint.global_waypoint_publish(self.start_point, self.goal_point)
+                    give_global_waypoint.destroy_node()
+                else:
+                    self.local_waypoint_publish()
+                
+                # act path following if local waypoint conveyed to path following
             else:
                 self.prm_off_con_mod.position   =   False
                 self.prm_off_con_mod.attitude   =   True

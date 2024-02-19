@@ -23,7 +23,8 @@ from px4_msgs.msg import OffboardControlMode
 from px4_msgs.msg import TrajectorySetpoint
 from px4_msgs.msg import VehicleAttitudeSetpoint
 
-from custom_msgs.msg import LocalWaypointSetpoint
+from custom_msgs.msg import LocalWaypointSetpoint, ConveyLocalWaypointComplete
+
 # from custom_msgs.msg import ConveyingWaypointFlag
 #.. PF algorithms libararies
 # from .testpy1 import testpypy1
@@ -191,10 +192,6 @@ class NodeAttCtrl(Node):
 
         # self.WP     =   Way_Point(self.wp_type_selection, self.waypoint_x, self.waypoint_y ,self.waypoint_z)
 
-
-
-
-        
         
         #.. MPPI setting
         self.MP     =   MPPI_Guidance_Parameter(self.Q6.Guid_type)
@@ -232,9 +229,12 @@ class NodeAttCtrl(Node):
             #.. subscriptions - from ROS2 msgs to ROS2 msgs
             self.MPPI_output_subscription   =   self.create_subscription(Float64MultiArray, 'MPPI/out/dbl_MPPI', self.subscript_MPPI_output, qos_profile_sensor_data)
             
-            # declare local waypoint subscriber fromcontroller
+            # declare local waypoint subscriber from controller
             self.local_waypoint_subscriber  =   self.create_subscription(LocalWaypointSetpoint, '/local_waypoint_setpoint_to_PF',self.local_waypoint_setpoint_call_back, 10) 
-        #
+            self.convey_local_waypoint_complete_publisher  =   self.create_publisher(ConveyLocalWaypointComplete, '/convey_local_waypoint_complete', 10) 
+        
+        
+        
         ###.. -  End  - set pub. sub. for ROS2 - ROS2 msg  ..###
         
         
@@ -674,6 +674,12 @@ class NodeAttCtrl(Node):
         print("                                          ")
         print("== receiving local waypoint complete!   ==")
         print("                                          ")
+        self.convey_local_waypoint_complete_publish()
+
+    def convey_local_waypoint_complete_publish(self):
+        msg = ConveyLocalWaypointComplete()
+        msg.convey_local_waypoint_is_complete = True
+        self.convey_local_waypoint_complete_publisher.publish(msg)
 
 
     ## inha - replace estimator to individual messeage   

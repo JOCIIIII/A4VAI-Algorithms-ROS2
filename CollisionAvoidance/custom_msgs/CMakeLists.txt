@@ -8,6 +8,8 @@ find_package(builtin_interfaces REQUIRED)
 set(msg_files
   "msg/GlobalWaypointSetpoint.msg"
   "msg/LocalWaypointSetpoint.msg"
+  "msg/ConveyLocalWaypointComplete.msg"
+  
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
