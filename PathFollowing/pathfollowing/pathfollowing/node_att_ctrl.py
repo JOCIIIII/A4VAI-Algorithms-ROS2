@@ -24,6 +24,7 @@ from px4_msgs.msg import TrajectorySetpoint
 from px4_msgs.msg import VehicleAttitudeSetpoint
 
 from custom_msgs.msg import LocalWaypointSetpoint, ConveyLocalWaypointComplete
+from custom_msgs.msg import ControllerHeartbeat, PathFollowingHeartbeat, PathPlanningHeartbeat
 
 # from custom_msgs.msg import ConveyingWaypointFlag
 #.. PF algorithms libararies
@@ -67,7 +68,6 @@ class NodeAttCtrl(Node):
         # #.. publishers - from ROS2 msgs to px4 msgs
         # self.vehicle_command_publisher_             =   self.create_publisher(VehicleCommand, msg_mapping_ros2_to_px4.VehicleCommand, 10)
         # self.offboard_control_mode_publisher_       =   self.create_publisher(OffboardControlMode, msg_mapping_ros2_to_px4.OffboardControlMode , 10)
-        self.vehicle_attitude_setpoint_publisher   =   self.create_publisher(VehicleAttitudeSetpoint, msg_mapping_ros2_to_px4.VehicleAttitudeSetpoint, 10)        
         # #.. subscriptions - from px4 msgs to ROS2 msgs
         self.vehicle_local_position_subscriber      =   self.create_subscription(VehicleLocalPosition,    '/fmu/out/vehicle_local_position',   self.vehicle_local_position_callback,   qos_profile_sensor_data)
         self.vehicle_attitude_subscriber            =   self.create_subscription(VehicleAttitude,         '/fmu/out/vehicle_attitude',         self.vehicle_attitude_callback,         qos_profile_sensor_data)
@@ -78,6 +78,13 @@ class NodeAttCtrl(Node):
         # #
         # ###.. -  End  - set pub. sub. for PX4 - ROS2 msg  ..###
 
+        ## inha publishers from path following msgs to controller msgs
+        self.vehicle_attitude_setpoint_publisher   =   self.create_publisher(VehicleAttitudeSetpoint,   msg_mapping_ros2_to_px4.VehicleAttitudeSetpoint, 10)        
+        self.heartbeat_publisher                    =  self.create_publisher(PathFollowingHeartbeat,    '/path_following_heartbeat', 10)
+
+        ## inha subscribe heartbeat from another module
+        self.path_planning_heartbeat_subscriber     =   self.create_subscription(PathPlanningHeartbeat, '/path_planning_heartbeat', self.path_planning_heartbeat_call_back, 10)
+        self.controller_heartbeat_subscriber        =   self.create_subscription(ControllerHeartbeat,   '/controller_heartbeat',    self.controller_heartbeat_call_back, 10)
 
         # ###.. - Start - set variable of publisher msg for PX4 - ROS2  ..###
         # #
@@ -159,6 +166,9 @@ class NodeAttCtrl(Node):
         period_offboard_att_ctrl    =   0.004           # required 250Hz at least for attitude control in [6]
         self.timer  =   self.create_timer(period_offboard_att_ctrl, self.publisher_vehicle_attitude_setpoint)
         
+        period_heartbeat_mode =   1        
+        self.heartbeat_timer  =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
+
         # # callback offboard_control_mode
         # # offboard counter in [3]
         # period_offboard_control_mode    =   0.2         # required about 5Hz for attitude control (proof that the external controller is healthy in [7])
@@ -297,7 +307,10 @@ class NodeAttCtrl(Node):
         ###.. -  End  - set other variables  ..###
         self.path_planning_complete = False
         self.variable_setting_complete = False 
-    
+
+        # heartbeat signal of another module node
+        self.controller_heartbeat       = False
+        self.path_planning_heartbeat    = False
 
 ## inha - substitute to controller
     #### main function
@@ -327,147 +340,150 @@ class NodeAttCtrl(Node):
     
     #.. main_attitude_control 
     def main_attitude_control(self):
-        if self.timesync_status_subscribe == False:
-            self.timesync_status_subscription          =   self.create_subscription(TimesyncStatus, '/fmu/out/timesync_status', self.subscript_timesync_status, qos_profile_sensor_data)
-            self.timesync_status_subscribe = True
-        if self.path_planning_complete == True and self.variable_setting_complete == False :
-            #.. variable setting
-            print("                                          ")
-            print("=====    revieved Path Planning      =====")
-            print("                                          ")
+        if self.controller_heartbeat == True and self.path_planning_heartbeat ==True:
+            if self.timesync_status_subscribe == False:
+                self.timesync_status_subscription          =   self.create_subscription(TimesyncStatus, '/fmu/out/timesync_status', self.subscript_timesync_status, qos_profile_sensor_data)
+                self.timesync_status_subscribe = True
+            if self.path_planning_complete == True and self.variable_setting_complete == False :
+                #.. variable setting
+                print("                                          ")
+                print("=====    revieved Path Planning      =====")
+                print("                                          ")
 
-            self.Q6.Ri  =   self.est_state.pos_NED
-            self.Q6.Vi  =   self.est_state.vel_NED
-            self.Q6.att_ang =   self.est_state.eul_ang_rad
-            self.Q6.cI_B    =   DCM_from_euler_angle(self.Q6.att_ang)
-            # self.Q6.throttle_hover = self.hover_thrust
-            #.. initialization
+                self.Q6.Ri  =   self.est_state.pos_NED
+                self.Q6.Vi  =   self.est_state.vel_NED
+                self.Q6.att_ang =   self.est_state.eul_ang_rad
+                self.Q6.cI_B    =   DCM_from_euler_angle(self.Q6.att_ang)
+                # self.Q6.throttle_hover = self.hover_thrust
+                #.. initialization
 
-            self.WP     =   Way_Point(self.wp_type_selection, self.waypoint_x, self.waypoint_y ,self.waypoint_z)
+                self.WP     =   Way_Point(self.wp_type_selection, self.waypoint_x, self.waypoint_y ,self.waypoint_z)
 
-            self.WP.init_WP(self.Q6.Ri)
-            self.VT.init_VT_Ri(self.WP.WPs, self.Q6.Ri, self.Q6.look_ahead_distance)
-            
-            self.VT_psi_cmd.init_VT_Ri(self.WP.WPs, self.Q6.Ri, self.Q6.look_ahead_distance_psi_cmd)
-            self.variable_setting_complete = True 
-        else :
-            pass
+                self.WP.init_WP(self.Q6.Ri)
+                self.VT.init_VT_Ri(self.WP.WPs, self.Q6.Ri, self.Q6.look_ahead_distance)
 
-        if self.variable_setting_complete == True :
-            #.. sim_time
-            # if self.takeoff_start:
-            #     current_time = int(Clock().now().nanoseconds / 1000) # time in microseconds
-            #     self.sim_time   =   (current_time - self.takeoff_time) / 1000000
-
-            #.. variable setting
-            self.Q6.Ri  =   self.est_state.pos_NED.copy()
-            self.Q6.Vi  =   self.est_state.vel_NED.copy()
-            self.Q6.att_ang =   self.est_state.eul_ang_rad
-            self.Q6.cI_B    =   DCM_from_euler_angle(self.Q6.att_ang)
-            self.Q6.throttle_hover = self.hover_thrust
-            self.Q6.Ai      =   np.matmul(np.transpose(self.Q6.cI_B), self.accel_xyz)
-
-            ###### - start - PF algorithm ######
-            #.. kinematics
-            mag_Vqi, LOS_azim, LOS_elev, tgo, FPA_azim, FPA_elev, self.Q6.cI_W = kinematics(self.VT.Ri, self.Q6.Ri, self.Q6.Vi)
-            _, LOS_azim_cmd, _, _, _, _, _ = kinematics(self.VT_psi_cmd.Ri, self.Q6.Ri, self.Q6.Vi)
-
-            # LA_azim     =   FPA_azim - LOS_azim
-            # LA_elev     =   FPA_elev - LOS_elev
-
-            #.. distance from quadrotor to ref. path  
-            self.dist_to_path, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.unit_Rw1w2 = \
-                distance_from_Q6_to_path(self.WP.WPs, self.Q6.WP_idx_heading, self.Q6.Ri, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed)
-
-
-            #.. virtual target modules
-            #.. directly decide a position of the virtual target 
-            # check waypoint - quadrotor
-            self.Q6.WP_idx_heading = check_waypoint(self.WP.WPs, self.Q6.WP_idx_heading, self.Q6.Ri, self.Q6.distance_change_WP)
-            # virtual target position
-            self.VT.Ri = virtual_target_position(self.dist_to_path, self.Q6.look_ahead_distance, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.WP.WPs)
-
-            self.VT_psi_cmd.Ri = virtual_target_position(self.dist_to_path, self.Q6.look_ahead_distance_psi_cmd, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.WP.WPs)
-
-            #.. guidance modules
-            Aqi_cmd, self.Q6.flag_guid_trans = guidance_modules(self.Q6.Guid_type, mag_Vqi, self.Q6.WP_idx_passed, self.Q6.flag_guid_trans, self.Q6.WP_idx_heading, self.WP.WPs.shape[0],
-                        self.VT.Ri, self.Q6.Ri, self.Q6.Vi, self.Q6.Ai, self.Q6.desired_speed, self.Q6.Kp_vel, self.Q6.Kd_vel, self.Q6.Kp_speed, self.Q6.Kd_speed, self.Q6.guid_eta, self.Q6.cI_W, tgo, self.MPPI_ctrl_input)                
-
-            if self.takeoff_start == True:
-                self.Q6.thr_unitvec, self.Q6.out_NDO, self.Q6.z_NDO = NDO_Aqi(
-                    self.Aqi_grav, self.Q6.mag_Aqi_thru, self.Q6.cI_B, self.Q6.thr_unitvec, self.Q6.gain_NDO, self.Q6.z_NDO, self.Q6.Vi, self.Q6.dt_GCU)
-
-            #.. compensate Aqi_cmd
-            self.Q6.Ai_est_dstb  =   self.Q6.out_NDO.copy()
-            # self.Q6.Ai_est_dstb  =   np.zeros(3)
-            Aqi_cmd = compensate_Aqi_cmd(Aqi_cmd, self.Q6.Ai_est_dstb, self.Aqi_grav)
-
-            #.. thrust command
-            self.Q6.mag_Aqi_thru, self.mag_thrust_cmd, norm_thrust_cmd = thrust_cmd(Aqi_cmd, self.Q6.throttle_hover, self.MP.a_lim, self.Q6.mass)
-
-            self.Aqi_cmd =  Aqi_cmd.copy()
-
-
-            #.. Psi cmd limit
-            Psi_des     =   LOS_azim_cmd
-
-            del_Psi     =   Psi_des - self.Q6.att_ang[2]
-
-            self.LOS_azim   =   Psi_des
-
-            if abs(del_Psi) > m.pi:
-                if Psi_des > self.Q6.att_ang[2]:
-                    del_Psi = del_Psi - 2.*m.pi
-                else:
-                    del_Psi = del_Psi + 2.*m.pi
+                self.VT_psi_cmd.init_VT_Ri(self.WP.WPs, self.Q6.Ri, self.Q6.look_ahead_distance_psi_cmd)
+                self.variable_setting_complete = True 
+            else :
                 pass
+
+            if self.variable_setting_complete == True :
+                #.. sim_time
+                # if self.takeoff_start:
+                #     current_time = int(Clock().now().nanoseconds / 1000) # time in microseconds
+                #     self.sim_time   =   (current_time - self.takeoff_time) / 1000000
+
+                #.. variable setting
+                self.Q6.Ri  =   self.est_state.pos_NED.copy()
+                self.Q6.Vi  =   self.est_state.vel_NED.copy()
+                self.Q6.att_ang =   self.est_state.eul_ang_rad
+                self.Q6.cI_B    =   DCM_from_euler_angle(self.Q6.att_ang)
+                self.Q6.throttle_hover = self.hover_thrust
+                self.Q6.Ai      =   np.matmul(np.transpose(self.Q6.cI_B), self.accel_xyz)
+
+                ###### - start - PF algorithm ######
+                #.. kinematics
+                mag_Vqi, LOS_azim, LOS_elev, tgo, FPA_azim, FPA_elev, self.Q6.cI_W = kinematics(self.VT.Ri, self.Q6.Ri, self.Q6.Vi)
+                _, LOS_azim_cmd, _, _, _, _, _ = kinematics(self.VT_psi_cmd.Ri, self.Q6.Ri, self.Q6.Vi)
+
+                # LA_azim     =   FPA_azim - LOS_azim
+                # LA_elev     =   FPA_elev - LOS_elev
+
+                #.. distance from quadrotor to ref. path  
+                self.dist_to_path, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.unit_Rw1w2 = \
+                    distance_from_Q6_to_path(self.WP.WPs, self.Q6.WP_idx_heading, self.Q6.Ri, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed)
+
+
+                #.. virtual target modules
+                #.. directly decide a position of the virtual target 
+                # check waypoint - quadrotor
+                self.Q6.WP_idx_heading = check_waypoint(self.WP.WPs, self.Q6.WP_idx_heading, self.Q6.Ri, self.Q6.distance_change_WP)
+                # virtual target position
+                self.VT.Ri = virtual_target_position(self.dist_to_path, self.Q6.look_ahead_distance, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.WP.WPs)
+
+                self.VT_psi_cmd.Ri = virtual_target_position(self.dist_to_path, self.Q6.look_ahead_distance_psi_cmd, self.Q6.p_closest_on_path, self.Q6.WP_idx_passed, self.WP.WPs)
+
+                #.. guidance modules
+                Aqi_cmd, self.Q6.flag_guid_trans = guidance_modules(self.Q6.Guid_type, mag_Vqi, self.Q6.WP_idx_passed, self.Q6.flag_guid_trans, self.Q6.WP_idx_heading, self.WP.WPs.shape[0],
+                            self.VT.Ri, self.Q6.Ri, self.Q6.Vi, self.Q6.Ai, self.Q6.desired_speed, self.Q6.Kp_vel, self.Q6.Kd_vel, self.Q6.Kp_speed, self.Q6.Kd_speed, self.Q6.guid_eta, self.Q6.cI_W, tgo, self.MPPI_ctrl_input)                
+
+                if self.takeoff_start == True:
+                    self.Q6.thr_unitvec, self.Q6.out_NDO, self.Q6.z_NDO = NDO_Aqi(
+                        self.Aqi_grav, self.Q6.mag_Aqi_thru, self.Q6.cI_B, self.Q6.thr_unitvec, self.Q6.gain_NDO, self.Q6.z_NDO, self.Q6.Vi, self.Q6.dt_GCU)
+
+                #.. compensate Aqi_cmd
+                self.Q6.Ai_est_dstb  =   self.Q6.out_NDO.copy()
+                # self.Q6.Ai_est_dstb  =   np.zeros(3)
+                Aqi_cmd = compensate_Aqi_cmd(Aqi_cmd, self.Q6.Ai_est_dstb, self.Aqi_grav)
+
+                #.. thrust command
+                self.Q6.mag_Aqi_thru, self.mag_thrust_cmd, norm_thrust_cmd = thrust_cmd(Aqi_cmd, self.Q6.throttle_hover, self.MP.a_lim, self.Q6.mass)
+
+                self.Aqi_cmd =  Aqi_cmd.copy()
+
+
+                #.. Psi cmd limit
+                Psi_des     =   LOS_azim_cmd
+
+                del_Psi     =   Psi_des - self.Q6.att_ang[2]
+
+                self.LOS_azim   =   Psi_des
+
+                if abs(del_Psi) > m.pi:
+                    if Psi_des > self.Q6.att_ang[2]:
+                        del_Psi = del_Psi - 2.*m.pi
+                    else:
+                        del_Psi = del_Psi + 2.*m.pi
+                    pass
+
+                del_Psi_limited = max(min(del_Psi, self.max_del_Psi), -self.max_del_Psi)
+
+                # gab_del_Psi     =   del_Psi - del_Psi_limited
+                # weight_del_Psi  =   max( self.max_del_Psi / (self.max_del_Psi + m.sqrt(abs(gab_del_Psi))), 0.2)
+
+                # max_LA_azim_cmd =   30 * m.pi/180.
+                # LA_azim_cmd =   FPA_azim - LOS_azim_cmd
+                # weight_del_Psi  =   max( max_LA_azim_cmd / (max_LA_azim_cmd + m.sqrt(abs(LA_azim_cmd))), 0.05)
+
+                Psi_cmd     =   self.Q6.att_ang[2] + del_Psi_limited # * weight_del_Psi
+                # Psi_cmd     =   0.
+
+                att_ang_cmd = att_cmd(self.Aqi_cmd, Psi_cmd, Psi_cmd)
+
+                # max_tmp     =   15. * m.pi /180.
+                # del_Phi     =   att_ang_cmd[0] - self.Q6.att_ang[0]
+                # del_The     =   att_ang_cmd[1] - self.Q6.att_ang[1]
+                # del_Phi_limited = max(min(del_Phi, max_tmp), -max_tmp)
+                # del_The_limited = max(min(del_The, max_tmp), -max_tmp)
+                # att_ang_cmd[0] = self.Q6.att_ang[0] + del_Phi_limited
+                # att_ang_cmd[1] = self.Q6.att_ang[1] + del_The_limited
+
+                # yaw continuity
+                if abs(att_ang_cmd[2] - self.Q6.att_ang[2]) > 1.5*m.pi:
+                    if att_ang_cmd[2] > self.Q6.att_ang[2]:
+                        att_ang_cmd[2] = att_ang_cmd[2] - 2.*m.pi
+                    else:
+                        att_ang_cmd[2] = att_ang_cmd[2] + 2.*m.pi
+
+                self.att_ang_cmd    =   att_ang_cmd.copy()
+
+                # takeoff
+                # if self.sim_time < 0.5:
+                #     norm_thrust_cmd = 0.5
+
+                self.norm_thrust_cmd = norm_thrust_cmd
+
+                ###### -  end  - PF algorithm ######
+
+                w, x, y, z = self.Euler2Quaternion(self.att_ang_cmd[0], self.att_ang_cmd[1], self.att_ang_cmd[2])
+                self.veh_att_set.thrust_body    =   [0., 0., -norm_thrust_cmd]
+                self.veh_att_set.q_d            =   [w, x, y, z]
+                pass
+            else :
+                pass
+        else:
+            pass
             
-            del_Psi_limited = max(min(del_Psi, self.max_del_Psi), -self.max_del_Psi)
-
-            # gab_del_Psi     =   del_Psi - del_Psi_limited
-            # weight_del_Psi  =   max( self.max_del_Psi / (self.max_del_Psi + m.sqrt(abs(gab_del_Psi))), 0.2)
-
-            # max_LA_azim_cmd =   30 * m.pi/180.
-            # LA_azim_cmd =   FPA_azim - LOS_azim_cmd
-            # weight_del_Psi  =   max( max_LA_azim_cmd / (max_LA_azim_cmd + m.sqrt(abs(LA_azim_cmd))), 0.05)
-
-            Psi_cmd     =   self.Q6.att_ang[2] + del_Psi_limited # * weight_del_Psi
-            # Psi_cmd     =   0.
-
-            att_ang_cmd = att_cmd(self.Aqi_cmd, Psi_cmd, Psi_cmd)
-
-            # max_tmp     =   15. * m.pi /180.
-            # del_Phi     =   att_ang_cmd[0] - self.Q6.att_ang[0]
-            # del_The     =   att_ang_cmd[1] - self.Q6.att_ang[1]
-            # del_Phi_limited = max(min(del_Phi, max_tmp), -max_tmp)
-            # del_The_limited = max(min(del_The, max_tmp), -max_tmp)
-            # att_ang_cmd[0] = self.Q6.att_ang[0] + del_Phi_limited
-            # att_ang_cmd[1] = self.Q6.att_ang[1] + del_The_limited
-
-            # yaw continuity
-            if abs(att_ang_cmd[2] - self.Q6.att_ang[2]) > 1.5*m.pi:
-                if att_ang_cmd[2] > self.Q6.att_ang[2]:
-                    att_ang_cmd[2] = att_ang_cmd[2] - 2.*m.pi
-                else:
-                    att_ang_cmd[2] = att_ang_cmd[2] + 2.*m.pi
-
-            self.att_ang_cmd    =   att_ang_cmd.copy()
-
-            # takeoff
-            # if self.sim_time < 0.5:
-            #     norm_thrust_cmd = 0.5
-
-            self.norm_thrust_cmd = norm_thrust_cmd
-
-            ###### -  end  - PF algorithm ######
-
-            w, x, y, z = self.Euler2Quaternion(self.att_ang_cmd[0], self.att_ang_cmd[1], self.att_ang_cmd[2])
-            self.veh_att_set.thrust_body    =   [0., 0., -norm_thrust_cmd]
-            self.veh_att_set.q_d            =   [w, x, y, z]
-            pass
-        else :
-            pass
-
     #.. state_logger 
     def state_logger(self):
         if (self.Q6.WP_idx_heading < self.WP.WPs.shape[0]-1):
@@ -516,28 +532,28 @@ class NodeAttCtrl(Node):
         
         pass
     
-    # #.. PF_evaluation
-    # def PF_evaluation(self):
-    #     Aqi_cmd_wo_grav     =   self.Aqi_cmd + self.Aqi_grav
-    #     tmp_Ru      =   np.matmul(self.R_mat, Aqi_cmd_wo_grav)
-    #     cost_uRu    =   np.dot(Aqi_cmd_wo_grav, tmp_Ru)
+    #.. PF_evaluation
+    def PF_evaluation(self):
+        Aqi_cmd_wo_grav     =   self.Aqi_cmd + self.Aqi_grav
+        tmp_Ru      =   np.matmul(self.R_mat, Aqi_cmd_wo_grav)
+        cost_uRu    =   np.dot(Aqi_cmd_wo_grav, tmp_Ru)
             
-    #     mag_Vqi_alinged_path   =   max(np.dot(self.unit_Rw1w2, self.Q6.Vi), 0)
-    #     cost_distance   =   self.Q[0] * (self.dist_to_path ** 2)
-    #     # print("1 = cost_distance" + str(round(cost_distance,2)))
-    #     if self.dist_to_path > self.Q_lim[0]:
-    #         cost_distance = cost_distance + self.Q[2] * (self.dist_to_path * self.dist_to_path)
-    #         # print("2 = cost_distance" + str(round(cost_distance,2)))
+        mag_Vqi_alinged_path   =   max(np.dot(self.unit_Rw1w2, self.Q6.Vi), 0)
+        cost_distance   =   self.Q[0] * (self.dist_to_path ** 2)
+        # print("1 = cost_distance" + str(round(cost_distance,2)))
+        if self.dist_to_path > self.Q_lim[0]:
+            cost_distance = cost_distance + self.Q[2] * (self.dist_to_path * self.dist_to_path)
+            # print("2 = cost_distance" + str(round(cost_distance,2)))
         
-    #     energy_cost1    =   self.mag_thrust_cmd/max(mag_Vqi_alinged_path, 0.1)
-    #     cost_a          =   self.Q[1] * energy_cost1
-    #     # print("3 = cost_a" + str(round(cost_a,2)))
-    #     if self.Q6.WP_idx_passed >= 1:
-    #         self.cost   =   np.array([cost_distance, cost_a, cost_uRu])
-    #     else:
-    #         self.cost   =   np.zeros(3)
+        energy_cost1    =   self.mag_thrust_cmd/max(mag_Vqi_alinged_path, 0.1)
+        cost_a          =   self.Q[1] * energy_cost1
+        # print("3 = cost_a" + str(round(cost_a,2)))
+        if self.Q6.WP_idx_passed >= 1:
+            self.cost   =   np.array([cost_distance, cost_a, cost_uRu])
+        else:
+            self.cost   =   np.zeros(3)
         
-    #     pass
+        pass
         
         
     ## inha - substitute to controller
@@ -681,6 +697,16 @@ class NodeAttCtrl(Node):
         msg.convey_local_waypoint_is_complete = True
         self.convey_local_waypoint_complete_publisher.publish(msg)
 
+    def publish_heartbeat(self):
+        msg = PathFollowingHeartbeat()
+        msg.path_following_heartbeat = True
+        self.heartbeat_publisher.publish(msg)
+
+    def controller_heartbeat_call_back(self,msg):
+        self.controller_heartbeat = msg.controller_heartbeat
+
+    def path_planning_heartbeat_call_back(self,msg):
+        self.path_planning_heartbeat = msg.path_planning_heartbeat
 
     ## inha - replace estimator to individual messeage   
     # ### subscriptions        

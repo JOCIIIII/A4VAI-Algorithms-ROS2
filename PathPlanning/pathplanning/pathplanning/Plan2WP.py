@@ -15,8 +15,9 @@
 import rclpy
 from rclpy.node import Node
 
-from custom_msgs.msg import GlobalWaypointSetpoint
-from custom_msgs.msg import LocalWaypointSetpoint
+from custom_msgs.msg import GlobalWaypointSetpoint, LocalWaypointSetpoint
+from custom_msgs.msg import ControllerHeartbeat, PathFollowingHeartbeat, PathPlanningHeartbeat
+
 from rclpy.qos import QoSProfile
 import cv2
 from cv_bridge import CvBridge
@@ -224,7 +225,7 @@ class PathPlanning:
 
         # 이미지에 맞게 SAC Waypoint 변경 후 그리기
         for i in range(1, step_num - 1):  # Changed to step_num - 1
-            for m in range(0, len(self.path_x) - 2):
+            for m in range(0, (self.path_x) - 2):
                 Im_i = int(self.path_x[m + 1])
                 Im_j = MapSize - int(self.path_y[m + 1])
 
@@ -613,9 +614,9 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
         self.bridge = CvBridge()
 
         # file path
-        self.image_path = '/home/user/px4_ros_ws/src/pathplanning/pathplanning/map/1000-003.png'
-        self.model_path = "/home/user/px4_ros_ws/src/pathplanning/pathplanning/model/90_exp_263k.onnx"
-        self.model_path2 = "/home/user/px4_ros_ws/src/pathplanning/pathplanning/model/test26.onnx"
+        self.image_path = '/home/user/ros_ws/src/pathplanning/pathplanning/map/1000-003.png'
+        self.model_path = "/home/user/ros_ws/src/pathplanning/pathplanning/model/90_exp_263k.onnx"
+        self.model_path2 = "/home/user/ros_ws/src/pathplanning/pathplanning/model/test26.onnx"
 
         # initialize global waypoint
         self.Init_custom = [0.0,0.0,0.0]
@@ -627,18 +628,30 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
         self.mode = 1
         
         # path plannig complete flag
-        self.path_plannig_start  = False     # flag whether path planning start 
-        self.path_planning_complete = False  # flag whether path planning is complete 
+        self.path_plannig_start         = False     # flag whether path planning start 
+        self.path_planning_complete     = False  # flag whether path planning is complete 
+
+        # heartbeat signal of another module node
+        self.controller_heartbeat       = False
+        self.path_following_heartbeat   = False
 
         # declare global waypoint subscriber from controller
-        self.global_waypoint_subscriber  = self.create_subscription(GlobalWaypointSetpoint, '/global_waypoint_setpoint', self.global_waypoint_callback ,10)
+        self.global_waypoint_subscriber              =   self.create_subscription(GlobalWaypointSetpoint, '/global_waypoint_setpoint',  self.global_waypoint_callback ,10)
         
+        self.controller_heartbeat_subscriber         =   self.create_subscription(ControllerHeartbeat,    '/controller_heartbeat',      self.controller_heartbeat_call_back, 10)
+        self.path_following_heartbeat_subscriber     =   self.create_subscription(PathFollowingHeartbeat, '/path_following_heartbeat',  self.path_following_heartbeat_call_back, 10)
+
         # declare local waypoint publisher to controller
-        self.local_waypoint_publisher   = self.create_publisher(LocalWaypointSetpoint, '/local_waypoint_setpoint_from_PP', 10)
-        
+        self.local_waypoint_publisher                =   self.create_publisher(LocalWaypointSetpoint, '/local_waypoint_setpoint_from_PP', 10)
+
+        self.heartbeat_publisher                     =   self.create_publisher(PathPlanningHeartbeat, '/path_planning_heartbeat', 10)
+
         print("                                          ")
         print("===== Path Planning Node is Running  =====")
         print("                                          ")
+
+        period_heartbeat_mode =   1        
+        self.heartbeat_timer  =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
 
     # Initialiaztion
     ## Range [-2500, 2500]으로 바꾸기
@@ -657,124 +670,136 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
         print("==  Sended local waypoint to controller ==")
         print("                                          ")
 
+    def publish_heartbeat(self):
+        msg = PathPlanningHeartbeat()
+        msg.path_planning_heartbeat = True
+        self.heartbeat_publisher.publish(msg)
+    
+    def controller_heartbeat_call_back(self,msg):
+        self.controller_heartbeat = msg.controller_heartbeat
+
+    def path_following_heartbeat_call_back(self,msg):
+        self.path_following_heartbeat = msg.path_following_heartbeat
+
     # update global waypoint and path plannig start flag if subscribe global waypoint from controller
     def global_waypoint_callback(self, msg):
-        
-        if self.path_plannig_start == False and self.path_planning_complete == False:
+        if self.controller_heartbeat == True and self.path_following_heartbeat == True:
+            if self.path_plannig_start == False and self.path_planning_complete == False:
 
-            self.Init_custom        =   msg.start_point
-            self.Target_custom      =   msg.goal_point
-            self.path_plannig_start = True
-            
-            print("                                          ")
-            print("===== Recieved Path Planning Request =====")
-            print("                                          ")
+                self.Init_custom        =   msg.start_point
+                self.Target_custom      =   msg.goal_point
+                self.path_plannig_start = True
 
+                print("                                          ")
+                print("===== Recieved Path Planning Request =====")
+                print("                                          ")
+
+            else:
+                pass
+
+            # Mode: 1 (현재 경로계획만 계산), 2 (현재 + 작년 경로계획과 같이 계산하여 정량평가까지 완료)
+            # Node Input: Image 경로 & Mode & 시작점 & 도착점, Output: wp (or Cost도)
+
+            if self.mode == 1 and self.path_planning_complete == False :
+
+                # model 90 deg
+                # start path planning
+                planner = PathPlanning(self.model_path, self.image_path)
+                planner.compute_path(self.Init_custom, self.Target_custom,
+                                 self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
+
+                planner.plot_binary("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_biary.png", self.Step_Num_custom)
+                planner.plot_original("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_og.png", self.Step_Num_custom)
+                print("                                          ")
+                print("=====   Path Planning Complete!!     =====")
+                print("                                          ")
+
+                planner.print_distance_length()
+                print("                                           ")
+
+                # setting msg
+                self.path_planning_complete     =       True
+                self.waypoint_x                 =       planner.path_x.tolist()
+                self.waypoint_y                 =       planner.path_y.tolist()
+                self.waypoint_z                 =       planner.path_z.tolist()
+
+                # publish local waypoint and path planning complete flag
+                self.local_waypoint_publish()
+
+            elif self.mode == 2:
+
+                # model 90 deg
+                planner = PathPlanning(self.model_path, self.image_path)
+                planner.compute_path(self.Init_custom, self.Target_custom,
+                                     self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
+                planner.plot_binary("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_biary_01.png", self.Step_Num_custom)
+                planner.plot_original("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_og_01.png", self.Step_Num_custom)
+
+
+                # model test26
+                planner2 = PathPlanning(self.model_path2, self.image_path)
+                planner2.compute_path(self.Init_custom, self.Target_custom, self.Step_Num_custom)  # start point , target point,
+                planner2.plot_binary("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_biary_02.png", self.Step_Num_custom)
+                planner2.plot_original("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_og_02.png", self.Step_Num_custom)
+
+                # Cost Calculation
+                ratio = planner.print_distance_length()
+                ratio2 = planner2.print_distance_length()
+
+                cost = ((ratio - ratio2)/ratio2) * 100
+                print("                                           ")
+                print("---------------Results----------------")
+                print("Cost: {:.2f}%".format(cost))
+                print("                                           ")
+
+
+
+            elif self.mode == 3:
+
+                # model 90 deg
+                planner = PathPlanning(self.model_path, self.image_path)
+                planner.compute_path(self.Init_custom, self.Target_custom,
+                                     self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
+                planner.plot_binary("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_binary.png", self.Step_Num_custom)
+                planner.plot_original("/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/SAC_Result_og.png", self.Step_Num_custom)
+
+                # RRT
+                start_coord = (self.Init_custom[0],self.Init_custom[2])  # Replace with your desired start coordinates
+                goal_coord = (self.Target_custom[0],self.Target_custom[2])
+
+                N = 10
+                planner3 = RRT(self.model_path,self.image_path)
+                total_path_ratio = []
+                for i in range(N):
+                    print(f"RRT Running iteration {i+1}/{N}")
+
+                    # Call the RRT path planning method
+                    planner3.RRT_PathPlanning(start_coord, goal_coord)
+
+                    # Plot the results
+                    planner3.plot_RRT(f"/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/Results_Images/RRT_Result_og_{i+1}.png")
+                    planner3.plot_RRT_binary(f"/home/user/ros_ws/src/pathplanning/pathplanning/Results_Images/Results_Images/RRT_Result_Binary_{i+1}.png")
+
+                    # Calculate and print the distance ratio
+                    distance_ratio = planner3.print_distance_length()
+                    total_path_ratio.append(distance_ratio)
+
+                # Display the results from all iterations
+                min_path_ratio = min(total_path_ratio)
+                print("                                           ")
+                print("---------------Results----------------")
+                print("RRT Min Path Length:: {:.2f}".format(min_path_ratio))
+
+                # Cost Calculation
+                ratio = planner.print_distance_length()
+                ratio2 = min_path_ratio
+
+                cost = ((ratio - ratio2)/ratio2) * 100
+
+                print("Cost: {:.2f}%".format(cost))
+                print("                                           ")
         else:
             pass
-
-        # Mode: 1 (현재 경로계획만 계산), 2 (현재 + 작년 경로계획과 같이 계산하여 정량평가까지 완료)
-        # Node Input: Image 경로 & Mode & 시작점 & 도착점, Output: wp (or Cost도)
-
-        if self.mode == 1 and self.path_planning_complete == False :
-
-            # model 90 deg
-            # start path planning
-            planner = PathPlanning(self.model_path, self.image_path)
-            planner.compute_path(self.Init_custom, self.Target_custom,
-                             self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
-            
-            planner.plot_binary("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_biary.png", self.Step_Num_custom)
-            planner.plot_original("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_og.png", self.Step_Num_custom)
-            print("                                          ")
-            print("=====   Path Planning Complete!!     =====")
-            print("                                          ")
-
-            planner.print_distance_length()
-            print("                                           ")
-
-            # setting msg
-            self.path_planning_complete     =       True
-            self.waypoint_x                 =       planner.path_x.tolist()
-            self.waypoint_y                 =       planner.path_y.tolist()
-            self.waypoint_z                 =       planner.path_z.tolist()
-
-            # publish local waypoint and path planning complete flag
-            self.local_waypoint_publish()
-
-        elif self.mode == 2:
-
-            # model 90 deg
-            planner = PathPlanning(self.model_path, self.image_path)
-            planner.compute_path(self.Init_custom, self.Target_custom,
-                                 self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
-            planner.plot_binary("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_biary_01.png", self.Step_Num_custom)
-            planner.plot_original("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_og_01.png", self.Step_Num_custom)
-
-
-            # model test26
-            planner2 = PathPlanning(self.model_path2, self.image_path)
-            planner2.compute_path(self.Init_custom, self.Target_custom, self.Step_Num_custom)  # start point , target point,
-            planner2.plot_binary("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_biary_02.png", self.Step_Num_custom)
-            planner2.plot_original("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_og_02.png", self.Step_Num_custom)
-
-            # Cost Calculation
-            ratio = planner.print_distance_length()
-            ratio2 = planner2.print_distance_length()
-
-            cost = ((ratio - ratio2)/ratio2) * 100
-            print("                                           ")
-            print("---------------Results----------------")
-            print("Cost: {:.2f}%".format(cost))
-            print("                                           ")
-
-
-
-        elif self.mode == 3:
-
-            # model 90 deg
-            planner = PathPlanning(self.model_path, self.image_path)
-            planner.compute_path(self.Init_custom, self.Target_custom,
-                                 self.Step_Num_custom)  # start point , target point,step_num, max lidar, scale factor
-            planner.plot_binary("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_binary.png", self.Step_Num_custom)
-            planner.plot_original("/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/SAC_Result_og.png", self.Step_Num_custom)
-
-            # RRT
-            start_coord = (self.Init_custom[0],self.Init_custom[2])  # Replace with your desired start coordinates
-            goal_coord = (self.Target_custom[0],self.Target_custom[2])
-
-            N = 10
-            planner3 = RRT(self.model_path,self.image_path)
-            total_path_ratio = []
-            for i in range(N):
-                print(f"RRT Running iteration {i+1}/{N}")
-
-                # Call the RRT path planning method
-                planner3.RRT_PathPlanning(start_coord, goal_coord)
-
-                # Plot the results
-                planner3.plot_RRT(f"/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/Results_Images/RRT_Result_og_{i+1}.png")
-                planner3.plot_RRT_binary(f"/home/user/px4_ros_ws/src/a4vai/a4vai/PathPlanning/PathPlaning_data/Results_Images/RRT_Result_Binary_{i+1}.png")
-
-                # Calculate and print the distance ratio
-                distance_ratio = planner3.print_distance_length()
-                total_path_ratio.append(distance_ratio)
-
-            # Display the results from all iterations
-            min_path_ratio = min(total_path_ratio)
-            print("                                           ")
-            print("---------------Results----------------")
-            print("RRT Min Path Length:: {:.2f}".format(min_path_ratio))
-
-            # Cost Calculation
-            ratio = planner.print_distance_length()
-            ratio2 = min_path_ratio
-
-            cost = ((ratio - ratio2)/ratio2) * 100
-
-            print("Cost: {:.2f}%".format(cost))
-            print("                                           ")
-
 
 
 
