@@ -15,8 +15,12 @@
 import rclpy
 from rclpy.node import Node
 
+#############################################################################################################
+# added by controller
+import os
 from custom_msgs.msg import GlobalWaypointSetpoint, LocalWaypointSetpoint
-from custom_msgs.msg import ControllerHeartbeat, PathFollowingHeartbeat, PathPlanningHeartbeat
+from custom_msgs.msg import Heartbeat
+#############################################################################################################
 
 from rclpy.qos import QoSProfile
 import cv2
@@ -27,7 +31,7 @@ import onnxruntime as ort
 import time
 import random
 import math
-import array
+
 
 class PathPlanning:
     def __init__(self, model_path, image_path, map_size=1000):
@@ -190,8 +194,11 @@ class PathPlanning:
             self.path_x = Waypoint[:i + 1, 0]
             self.path_y = Waypoint[:i + 1, 2]
 
+#############################################################################################################
+# added by controller
+# altitude 150 -> 5
         self.path_z = 5 * np.ones(len(self.path_x))
-
+#############################################################################################################
 
 
     def plot_binary(self, output_path, step_num):
@@ -225,7 +232,7 @@ class PathPlanning:
 
         # 이미지에 맞게 SAC Waypoint 변경 후 그리기
         for i in range(1, step_num - 1):  # Changed to step_num - 1
-            for m in range(0, (self.path_x) - 2):
+            for m in range(0, len(self.path_x) - 2):
                 Im_i = int(self.path_x[m + 1])
                 Im_j = MapSize - int(self.path_y[m + 1])
 
@@ -613,50 +620,60 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
         
         self.bridge = CvBridge()
 
+        # mode change
+        self.mode = os.environ['MODE']
+        
+        # initialize global waypoint
+        self.Init_custom = [0.0,0.0,0.0]
+        self.Target_custom = [0.0,0.0,0.0]
+
+        # Initialiaztion
+        ## Range [-2500, 2500]으로 바꾸기
+        self.MapSize = 1000  # size 500
+        self.Step_Num_custom = self.MapSize + 1000
+
+#############################################################################################################
+# added by controller
         # file path
         self.image_path = '/home/user/ros_ws/src/pathplanning/pathplanning/map/1000-003.png'
         self.model_path = "/home/user/ros_ws/src/pathplanning/pathplanning/model/90_exp_263k.onnx"
         self.model_path2 = "/home/user/ros_ws/src/pathplanning/pathplanning/model/test26.onnx"
 
-        # initialize global waypoint
-        self.Init_custom = [0.0,0.0,0.0]
-        self.Target_custom = [0.0,0.0,0.0]
-        
-        ## It needs to be changed
-        # mode change
-        # It will substitute hard coding to environment variable
-        self.mode = 1
-        
         # path plannig complete flag
-        self.path_plannig_start         = False     # flag whether path planning start 
-        self.path_planning_complete     = False  # flag whether path planning is complete 
+        self.path_plannig_start         = False         # flag whether path planning start 
+        self.path_planning_complete     = False         # flag whether path planning is complete 
 
         # heartbeat signal of another module node
-        self.controller_heartbeat       = False
-        self.path_following_heartbeat   = False
+        self.controller_heartbeat           = False     # flag controller heartbeat
+        self.path_following_heartbeat       = False     # flag path following heartbeat
+        self.collision_avoidance_heartbeat  = False     # flag collision avoidance heartbeat
 
         # declare global waypoint subscriber from controller
-        self.global_waypoint_subscriber              =   self.create_subscription(GlobalWaypointSetpoint, '/global_waypoint_setpoint',  self.global_waypoint_callback ,10)
+        self.global_waypoint_subscriber                 =   self.create_subscription(GlobalWaypointSetpoint, '/global_waypoint_setpoint',  self.global_waypoint_callback ,10)
         
-        self.controller_heartbeat_subscriber         =   self.create_subscription(ControllerHeartbeat,    '/controller_heartbeat',      self.controller_heartbeat_call_back, 10)
-        self.path_following_heartbeat_subscriber     =   self.create_subscription(PathFollowingHeartbeat, '/path_following_heartbeat',  self.path_following_heartbeat_call_back, 10)
-
+        # declare heartbeat_subscriber 
+        self.controller_heartbeat_subscriber            =   self.create_subscription(Heartbeat, '/controller_heartbeat',            self.controller_heartbeat_call_back,            10)
+        self.path_following_heartbeat_subscriber        =   self.create_subscription(Heartbeat, '/path_following_heartbeat',        self.path_following_heartbeat_call_back,        10)
+        self.collision_avoidance_heartbeat_subscriber   =   self.create_subscription(Heartbeat, '/collision_avoidance_heartbeat',   self.collision_avoidance_heartbeat_call_back,   10)
+        
         # declare local waypoint publisher to controller
-        self.local_waypoint_publisher                =   self.create_publisher(LocalWaypointSetpoint, '/local_waypoint_setpoint_from_PP', 10)
+        self.local_waypoint_publisher      =   self.create_publisher(LocalWaypointSetpoint, '/local_waypoint_setpoint_from_PP', 10)
 
-        self.heartbeat_publisher                     =   self.create_publisher(PathPlanningHeartbeat, '/path_planning_heartbeat', 10)
+        # declare heartbeat_publisher 
+        self.heartbeat_publisher           =   self.create_publisher(Heartbeat, '/path_planning_heartbeat', 10)
 
         print("                                          ")
         print("===== Path Planning Node is Running  =====")
         print("                                          ")
 
+        # declare heartbeat_timer
         period_heartbeat_mode =   1        
         self.heartbeat_timer  =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
+#############################################################################################################
 
-    # Initialiaztion
-    ## Range [-2500, 2500]으로 바꾸기
-        self.MapSize = 1000  # size 500
-        self.Step_Num_custom = self.MapSize + 1000
+
+#############################################################################################################
+# added by controller
 
     # publish local waypoint and path planning complete flag
     def local_waypoint_publish(self):
@@ -670,20 +687,31 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
         print("==  Sended local waypoint to controller ==")
         print("                                          ")
 
+# heartbeat check function
+    # heartbeat publish
     def publish_heartbeat(self):
-        msg = PathPlanningHeartbeat()
-        msg.path_planning_heartbeat = True
+        msg = Heartbeat()
+        msg.heartbeat = True
         self.heartbeat_publisher.publish(msg)
-    
+
+    # heartbeat subscribe from controller
     def controller_heartbeat_call_back(self,msg):
-        self.controller_heartbeat = msg.controller_heartbeat
+        self.controller_heartbeat = msg.heartbeat
 
+    # heartbeat subscribe from path following
     def path_following_heartbeat_call_back(self,msg):
-        self.path_following_heartbeat = msg.path_following_heartbeat
+        self.path_following_heartbeat = msg.heartbeat
 
+    # heartbeat subscribe from collision avoidance
+    def collision_avoidance_heartbeat_call_back(self,msg):
+        self.collision_avoidance_heartbeat = msg.heartbeat
+#############################################################################################################
+    
+    # added by controller
     # update global waypoint and path plannig start flag if subscribe global waypoint from controller
     def global_waypoint_callback(self, msg):
-        if self.controller_heartbeat == True and self.path_following_heartbeat == True:
+        # check heartbeat
+        if self.controller_heartbeat == True and self.path_following_heartbeat == True and self.collision_avoidance_heartbeat == True:
             if self.path_plannig_start == False and self.path_planning_complete == False:
 
                 self.Init_custom        =   msg.start_point
@@ -802,7 +830,6 @@ class PathPlanningServer(Node):  # topic 이름과 message 타입은 서로 매�
             pass
 
 
-
 def main(args=None):
     rclpy.init(args=args)
     SAC_module = PathPlanningServer()
@@ -817,3 +844,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+

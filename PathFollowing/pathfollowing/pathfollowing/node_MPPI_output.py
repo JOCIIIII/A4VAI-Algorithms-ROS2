@@ -81,13 +81,13 @@ class Node_MPPI_Output(Node):
         self.timer  =   self.create_timer(dt_GPR_est, self.GPR_Forecasting)
         
         
-        # #.. callback GPR_logger
-        # self.period_GPR_logger = 1.
-        # self.timer  =   self.create_timer(self.period_GPR_logger, self.GPR_logger)
-        # self.GPRlog_t = open("/root/point_mass_6d/datalogfile/GPRlog_t.txt",'w+')
-        # self.GPRlog_X = open("/root/point_mass_6d/datalogfile/GPRlog_X.txt",'w+')
-        # self.GPRlog_Y = open("/root/point_mass_6d/datalogfile/GPRlog_Y.txt",'w+')
-        # self.GPRlog_Z = open("/root/point_mass_6d/datalogfile/GPRlog_Z.txt",'w+')
+        #.. callback GPR_logger
+        self.period_GPR_logger = 1.
+        self.timer  =   self.create_timer(self.period_GPR_logger, self.GPR_logger)
+        self.GPRlog_t = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_t.txt",'w+')
+        self.GPRlog_X = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_X.txt",'w+')
+        self.GPRlog_Y = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_Y.txt",'w+')
+        self.GPRlog_Z = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_Z.txt",'w+')
         
         ###### -  end  - Vars. for GPR algorithm ######
         
@@ -220,7 +220,7 @@ class Node_MPPI_Output(Node):
         self.Q6.out_NDO[0]  =   msg.data[1]
         self.Q6.out_NDO[1]  =   msg.data[2]
         self.Q6.out_NDO[2]  =   msg.data[3]
-        self.get_logger().info('subscript_GPR_input_dbl_NDO msgs: {0}'.format(msg.data))
+        # self.get_logger().info('subscript_GPR_input_dbl_NDO msgs: {0}'.format(msg.data))
         
         self.GPR_Update()
         pass
@@ -239,5 +239,4 @@ def main(args=None):
     pass
 if __name__ == '__main__':
     main()
-
 

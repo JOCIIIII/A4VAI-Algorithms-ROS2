@@ -9,10 +9,7 @@ set(msg_files
   "msg/GlobalWaypointSetpoint.msg"
   "msg/LocalWaypointSetpoint.msg"
   "msg/ConveyLocalWaypointComplete.msg"
-  "msg/PathPlanningHeartbeat.msg"
-  "msg/PathFollowingHeartbeat.msg"
-  "msg/ControllerHeartbeat.msg"
-  "msg/CollisionAvoidanceHeartbeat.msg"
+  "msg/Heartbeat.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
