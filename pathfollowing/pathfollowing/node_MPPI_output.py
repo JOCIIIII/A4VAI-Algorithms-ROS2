@@ -143,7 +143,7 @@ class Node_MPPI_Output(Node):
         msg.data            =   [self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1], self.QR.guid_var.MPPI_ctrl_input[2]]
         
         self.MPPI_output_publisher_.publish(msg)
-        # self.get_logger().info('wp_heading: {0}'.format(np.linalg.norm(self.QR.state_var.Vi)))
+        # self.get_logger().info('mppi: {0}'.format(np.linalg.norm(self.M)))
         # self.get_logger().info("subscript_MPPI_output: [0]=" + str(self.MPPI_ctrl_input[0]) +", [1]=" + str(self.MPPI_ctrl_input[1]) +", [2]=" + str(self.MPPI_ctrl_input[2]))
         pass
 
@@ -175,14 +175,15 @@ class Node_MPPI_Output(Node):
                 self.MG.Ai_est_dstb[:,0] = self.GP.GP_param.me_x_array
                 self.MG.Ai_est_dstb[:,1] = self.GP.GP_param.me_y_array
                 self.MG.Ai_est_dstb[:,2] = self.GP.GP_param.me_z_array
+
+                self.MG.Ai_est_var[:,0] = self.GP.GP_param.var_x_array 
         
-                # self.MG.Ai_est_dstb[:,0] = self.QR.guid_var.out_NDO[0]*np.ones(self.MG.MP.N)
-                # self.MG.Ai_est_dstb[:,1] = self.QR.guid_var.out_NDO[1]*np.ones(self.MG.MP.N)
-                # self.MG.Ai_est_dstb[:,2] = self.QR.guid_var.out_NDO[2]*np.ones(self.MG.MP.N)
             else:
                 self.MG.Ai_est_dstb[:,0] = self.QR.guid_var.out_NDO[0]*np.ones(self.MG.MP.N)
                 self.MG.Ai_est_dstb[:,1] = self.QR.guid_var.out_NDO[1]*np.ones(self.MG.MP.N)
                 self.MG.Ai_est_dstb[:,2] = self.QR.guid_var.out_NDO[2]*np.ones(self.MG.MP.N)
+
+            # self.get_logger().info("GP: "+str(self.MG.Ai_est_dstb[0,0])+", NDO: "+str(self.QR.guid_var.out_NDO[0]))
 
             #.. MPPI algorithm
             self.QR.guid_var.MPPI_ctrl_input, self.QR.guid_var.MPPI_calc_time = self.MG.run_MPPI_Guidance(self.QR, self.WP.WPs)
@@ -191,7 +192,8 @@ class Node_MPPI_Output(Node):
         else:
             pass
 
-        # self.get_logger().info("subscript_MPPI_output: " + str(self.MPPI_ctrl_input[0]) +", [1]=" + str(self.MPPI_ctrl_input[1]) +", [2]=" + str(self.MPPI_ctrl_input[2]))
+        
+        # self.get_logger().info("subscript_MPPI_output: " + str(self.QR.guid_var.MPPI_ctrl_input[0]) +", [1]=" + str(self.QR.guid_var.MPPI_ctrl_input[1]) +", [2]=" + str(self.QR.guid_var.MPPI_ctrl_input[2]))
         pass
     
     ###.. GPR functions ..###

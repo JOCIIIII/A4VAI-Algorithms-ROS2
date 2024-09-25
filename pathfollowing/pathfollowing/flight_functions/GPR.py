@@ -37,26 +37,29 @@ class GPR_Modules():
                 temp1 = temp1 + np.array(self.GP_param.training_data_x[j + 1]).dot(np.array(self.GP_param.training_data_x[j]).T)
                 temp2 = temp2 + np.array(self.GP_param.training_data_x[j]).dot(np.array(self.GP_param.training_data_x[j]).T)
 
-            A_ml = temp1.dot(np.linalg.inv(temp2))
+            if (np.max(temp1)<1.0 or np.max(temp2)<1.0):
+                pass
+            else:
+                A_ml = temp1.dot(np.linalg.inv(temp2))
 
-            self.GP_param.hyp_l_GPR[0] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
-            l_opt = self.GP_param.hyp_l_GPR[0]
+                self.GP_param.hyp_l_GPR[0] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
+                l_opt = self.GP_param.hyp_l_GPR[0]
 
-            self.GP_param.F_x_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
-            self.GP_param.A_x_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
+                self.GP_param.F_x_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
+                self.GP_param.A_x_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
 
-            for j in range(len(self.GP_param.training_data_x) - 1):
-                temp = np.array(self.GP_param.training_data_x[j + 1] - self.GP_param.A_x_GPR.dot(np.array(self.GP_param.training_data_x[j])))
-                temp3 = temp3 + temp.dot(temp.T)
+                for j in range(len(self.GP_param.training_data_x) - 1):
+                    temp = np.array(self.GP_param.training_data_x[j + 1] - self.GP_param.A_x_GPR.dot(np.array(self.GP_param.training_data_x[j])))
+                    temp3 = temp3 + temp.dot(temp.T)
 
-            S_ml = temp3 / (len(self.GP_param.training_data_x) - 1)
-            self.GP_param.hyp_q_GPR[0] = S_ml[1][1] / (
-                        self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
+                S_ml = temp3 / (len(self.GP_param.training_data_x) - 1)
+                self.GP_param.hyp_q_GPR[0] = S_ml[1][1] / (
+                            self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
 
-            self.GP_param.Q_x_GPR = self.GP_param.hyp_q_GPR[0] * np.array(
-                [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
-                 [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
-                  self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
+                self.GP_param.Q_x_GPR = self.GP_param.hyp_q_GPR[0] * np.array(
+                    [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
+                    [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
+                    self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
 
         if (self.GP_param.count_GPR == 2):
 
@@ -69,26 +72,29 @@ class GPR_Modules():
                 temp1 = temp1 + np.array(self.GP_param.training_data_y[j + 1]).dot(np.array(self.GP_param.training_data_y[j]).T)
                 temp2 = temp2 + np.array(self.GP_param.training_data_y[j]).dot(np.array(self.GP_param.training_data_y[j]).T)
 
-            A_ml = temp1.dot(np.linalg.inv(temp2))
+            if (np.max(temp1)<1.0 or np.max(temp2)<1.0):
+                pass
+            else:
+                A_ml = temp1.dot(np.linalg.inv(temp2))
 
-            self.GP_param.hyp_l_GPR[1] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
-            l_opt = self.GP_param.hyp_l_GPR[1]
+                self.GP_param.hyp_l_GPR[1] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
+                l_opt = self.GP_param.hyp_l_GPR[1]
 
-            self.GP_param.F_y_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
-            self.GP_param.A_y_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
+                self.GP_param.F_y_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
+                self.GP_param.A_y_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
 
-            for j in range(len(self.GP_param.training_data_y) - 1):
-                temp = np.array(self.GP_param.training_data_y[j + 1] - self.GP_param.A_y_GPR.dot(np.array(self.GP_param.training_data_y[j])))
-                temp3 = temp3 + temp.dot(temp.T)
+                for j in range(len(self.GP_param.training_data_y) - 1):
+                    temp = np.array(self.GP_param.training_data_y[j + 1] - self.GP_param.A_y_GPR.dot(np.array(self.GP_param.training_data_y[j])))
+                    temp3 = temp3 + temp.dot(temp.T)
 
-            S_ml = temp3 / (len(self.GP_param.training_data_y) - 1)
-            self.GP_param.hyp_q_GPR[1] = S_ml[1][1] / (
-                        self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
+                S_ml = temp3 / (len(self.GP_param.training_data_y) - 1)
+                self.GP_param.hyp_q_GPR[1] = S_ml[1][1] / (
+                            self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
 
-            self.GP_param.Q_y_GPR = self.GP_param.hyp_q_GPR[1] * np.array(
-                [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
-                 [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
-                  self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
+                self.GP_param.Q_y_GPR = self.GP_param.hyp_q_GPR[1] * np.array(
+                    [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
+                    [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
+                    self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
 
         if (self.GP_param.count_GPR == 3):
             temp1 = np.zeros([2, 2])
@@ -99,26 +105,29 @@ class GPR_Modules():
                 temp1 = temp1 + np.array(self.GP_param.training_data_z[j + 1]).dot(np.array(self.GP_param.training_data_z[j]).T)
                 temp2 = temp2 + np.array(self.GP_param.training_data_z[j]).dot(np.array(self.GP_param.training_data_z[j]).T)
 
-            A_ml = temp1.dot(np.linalg.inv(temp2))
+            if (np.max(temp1)<1.0 or np.max(temp2)<1.0):
+                pass
+            else:
+                A_ml = temp1.dot(np.linalg.inv(temp2))
 
-            self.GP_param.hyp_l_GPR[2] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
-            l_opt = self.GP_param.hyp_l_GPR[2]
+                self.GP_param.hyp_l_GPR[2] = np.sqrt(np.abs(A_ml[1][0]) / self.GP_param.dt_GPR)
+                l_opt = self.GP_param.hyp_l_GPR[2]
 
-            self.GP_param.F_z_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
-            self.GP_param.A_z_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
+                self.GP_param.F_z_GPR = np.array([[0.0, 1.0], [-pow(l_opt, 2), -2 * l_opt]])
+                self.GP_param.A_z_GPR = np.array([[1.0, self.GP_param.dt_GPR], [-pow(l_opt, 2) * self.GP_param.dt_GPR, 1 - 2 * l_opt * self.GP_param.dt_GPR]])
 
-            for j in range(len(self.GP_param.training_data_z) - 1):
-                temp = np.array(self.GP_param.training_data_z[j + 1] - self.GP_param.A_z_GPR.dot(np.array(self.GP_param.training_data_z[j])))
-                temp3 = temp3 + temp.dot(temp.T)
+                for j in range(len(self.GP_param.training_data_z) - 1):
+                    temp = np.array(self.GP_param.training_data_z[j + 1] - self.GP_param.A_z_GPR.dot(np.array(self.GP_param.training_data_z[j])))
+                    temp3 = temp3 + temp.dot(temp.T)
 
-            S_ml = temp3 / (len(self.GP_param.training_data_z) - 1)
-            self.GP_param.hyp_q_GPR[2] = S_ml[1][1] / (
-                        self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
+                S_ml = temp3 / (len(self.GP_param.training_data_z) - 1)
+                self.GP_param.hyp_q_GPR[2] = S_ml[1][1] / (
+                            self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3))
 
-            self.GP_param.Q_z_GPR = self.GP_param.hyp_q_GPR[1] * np.array(
-                [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
-                 [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
-                  self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
+                self.GP_param.Q_z_GPR = self.GP_param.hyp_q_GPR[1] * np.array(
+                    [[1 / 3 * pow(self.GP_param.dt_GPR, 3), 0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3)],
+                    [0.5 * pow(self.GP_param.dt_GPR, 2) - 2 * l_opt / 3 * pow(self.GP_param.dt_GPR, 3),
+                    self.GP_param.dt_GPR - 2 * l_opt * pow(self.GP_param.dt_GPR, 2) + 4 / 3 * pow(l_opt, 2) * pow(self.GP_param.dt_GPR, 3)]])
 
             self.GP_param.count_GPR = 0
 

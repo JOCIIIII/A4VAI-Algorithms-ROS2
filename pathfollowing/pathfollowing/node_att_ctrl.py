@@ -10,8 +10,6 @@ from rclpy.clock  import Clock
 from rclpy.qos    import qos_profile_sensor_data
 from std_msgs.msg import Float64MultiArray
 from std_msgs.msg import Int32MultiArray
-from std_msgs.msg import Bool
-from std_msgs.msg import Int32
 
 #===================================================================================================================
 #.. PX4 libararies - sub.
@@ -89,7 +87,7 @@ class NodeAttCtrl(Node):
         self.timesync_status_flag           = False
         self.variable_setting_complete      = False 
         self.path_planning_complete         = False
-        self.waypoint_convert_flag          = False
+        
         # heartbeat signal of another module node
         self.controller_heartbeat           = False
         self.path_planning_heartbeat        = False
@@ -109,8 +107,6 @@ class NodeAttCtrl(Node):
         self.vehicle_attitude_subscriber                =   self.create_subscription(VehicleAttitude,         '/fmu/out/vehicle_attitude',         self.vehicle_attitude_callback,         qos_profile_sensor_data)
         self.vehicle_acceleration_subscription          =   self.create_subscription(VehicleAcceleration, '/fmu/out/vehicle_acceleration', self.subscript_vehicle_acceleration, qos_profile_sensor_data)      
 
-        self.waypoint_convert_flag_subscriber            =   self.create_subscription(Bool                   ,'/waypoint_convert_flag', self.waypoint_convert_flag_call_back, 10)
-
         if self.guid_type_case >= 3:
             self.MPPI_output_subscription   =   self.create_subscription(Float64MultiArray, 'MPPI/out/dbl_MPPI', self.subscript_MPPI_output, qos_profile_sensor_data)
 
@@ -120,7 +116,6 @@ class NodeAttCtrl(Node):
         self.vehicle_attitude_setpoint_publisher        =   self.create_publisher(VehicleAttitudeSetpoint,   '/pf_att_2_control', 10)
         self.local_waypoint_receive_complete_publisher  =   self.create_publisher(ConveyLocalWaypointComplete, '/convey_local_waypoint_complete', 10) 
         self.heartbeat_publisher                        =   self.create_publisher(Heartbeat,    '/path_following_heartbeat', 10)
-        self.current_heading_waypoint_publisher         =   self.create_publisher(Int32,      '/current_heading_waypoint', 1)
 
         if self.guid_type_case >= 3:
             #.. publishers - from ROS2 msgs to ROS2 msgs
@@ -218,9 +213,6 @@ class NodeAttCtrl(Node):
         else :
             self.sim_time =   msg.timestamp * 0.000001 - self.first_time
 
-    def waypoint_convert_flag_call_back(self, msg):
-        self.QR.PF_var.WP_manual = msg.data
-
     #===================================================================================================================
     # Publication Functions   
     #===================================================================================================================
@@ -306,14 +298,6 @@ class NodeAttCtrl(Node):
         # print(self.WP.WPs)
         pass
 
-    def publish_current_heading_waypoint(self):
-        if self.waypoint_convert_flag == False:
-            msg = Int32()
-            msg.data = self.QR.PF_var.WP_idx_heading
-            self.current_heading_waypoint_publisher.publish(msg)
-            self.waypoint_convert_flag = True
-
-
     #===================================================================================================================
     # Functions
     #===================================================================================================================
@@ -336,8 +320,12 @@ class NodeAttCtrl(Node):
                 
                  # waypoint settings                     
                 self.WP.set_values(self.wp_type_selection, self.WP.waypoint_x, self.WP.waypoint_y, self.WP.waypoint_z)
+
                 self.WP.insert_WP(0, self.QR.state_var.Ri)
-                                
+                
+                # var for waypoint regeneration test
+                self.count_stop = 0
+
                 ### ---  End  - need configuration of simulation setting --- ###
 
                 self.variable_setting_complete = True
@@ -345,17 +333,28 @@ class NodeAttCtrl(Node):
                 pass
 
             if self.variable_setting_complete == True :
-                # #.. waypoint rejection (WHEN wp_type_selection == 1 (rectangle path->triangle path))
-                # if (self.QR.PF_var.WP_idx_heading == 5):
-                #     self.QR.PF_var.WP_manual = 1
 
-                if (self.QR.PF_var.WP_manual == 1):
-                    self.waypoint_convert_flag = False
-                    self.publish_current_heading_waypoint()
-                    self.WP.WPs = self.QR.WP_manual_set(self.WP.WPs)
+                # For test------------------------------------------                
+                # 20240914 diy
+                # self.count_stop = self.count_stop + 1
+
+                # if (self.count_stop>15000 and self.count_stop<18000):
+                #     self.QR.PF_var.stop_flag = 1
+
+                # if (self.count_stop == 18000):
+                #     self.QR.PF_var.reWP_flag      = 1
+                #     self.QR.PF_var.stop_flag      = 0
+                # ---------------------------------------------------
+
+                #.. waypoint regeneration
+                if (self.QR.PF_var.reWP_flag == 1):
+                    self.QR.PF_var.reWP_flag      = 0    
+                    self.WP.WPs                   = self.WP.reWPs
+                    self.QR.PF_var.WP_idx_heading = 1
+                    self.QR.PF_var.WP_idx_passed  = 0
+                    self.WP.insert_WP(0, self.QR.state_var.Ri)   
+                    self.WP.insert_WP(0, self.QR.state_var.Ri)     
                     
-                self.QR.PF_var.WP_manual = 0              
-
                 #.. state variables updates (from px4)
                 self.QR.update_states(self.est_state.pos_NED, self.est_state.vel_NED, self.est_state.eul_ang_rad, self.est_state.accel_xyz)
                 
@@ -363,11 +362,7 @@ class NodeAttCtrl(Node):
                 self.QR.PF_required_info(self.WP.WPs, self.sim_time, self.QR.GnC_param.dt_GCU)
 
                 #.. guidance                
-                self.QR.guid_Ai_cmd(self.WP.WPs.shape[0], self.QR.guid_var.MPPI_ctrl_input)  # based on the geometry and VT
-                
-                #.. uav speed log
-                # self.get_logger().info('desired speed: {0}'.format(self.QR.GnC_param.desired_speed_test))
-                           
+                self.QR.guid_Ai_cmd(self.WP.WPs.shape[0], self.QR.guid_var.MPPI_ctrl_input)  # based on the geometry and VT     
                 self.QR.guid_compensate_Ai_cmd()                                             # gravity, disturbance rejection
                 self.QR.guid_NDO_for_Ai_cmd()                                                # NDO for disturbance estimation
                 self.QR.guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd(self.WP.WPs)

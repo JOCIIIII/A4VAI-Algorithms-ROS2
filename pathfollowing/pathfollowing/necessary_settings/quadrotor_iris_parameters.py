@@ -27,37 +27,30 @@ class MPPI_Parameter():
         self.MPPI_type =  MPPI_type  # | 0: Ctrl-based | 1: GL-based | 2: Direct | 3: GL-based-MPPI | 4: Ctrl-based MPPI | 9: test
         
         # cost-related
-        # self.Q      =   np.array([4.0, 0.])     # dist, V
-        self.Q      =   np.array([10.0, 0.0])     # dist, V
-        # self.R      =   np.array([0.004])
-        self.R      =   np.array([0.001])
-        # self.P      =   np.array([40.0])
-        self.P      =   np.array([10.0])
-        # self.P      =   np.array([5.0])
-        self.cost_min_V_aligned = 0.3
-
-        self.dt_MPPI = 0.05
+        W = 0.01
+        self.Q                  =   W * np.array([1.0, 1.]) * 1.
+        self.R                  =   W * np.array([0.5, 0.5, 0.5]) * 0.1     # R? MPPI input ?? ??? ??? ? ?? ?? **-??240827-**
+        self.P                  =   W * np.array([0.5]) * 0.5 * 2.0
+        self.cost_min_V_aligned =   0.3
+        self.dt_MPPI            =   0.05
         
         # MPPI parameters
         if self.MPPI_type == 3:
             self.flag_cost_calc     =   0
+            
             #.. Parameters - low performance && short computation
             self.dt_MPPI     =   0.05
             self.K           =   256 
             self.N           =   70
             #.. u1: VTD, u2: desired_speed, u3: guid_eta
             
-            self.var2       =   1.0 * 0.5
-            self.var3       =   1.0 * 0.5 
-            self.lamb2      =   1.0 * 1.0
-            self.lamb3      =   1.0 * 1.0 
-            # self.lamb2      =   self.R[0]*self.var2*self.var2
-            # self.lamb3      =   self.R[0]*self.var3*self.var3
-
-            # self.var2       =   np.sqrt(self.lamb2/self.R[0])
+            self.var2       =   1.0 * 0.7
+            self.var3       =   1.0 * 0.7
+            self.lamb2      =   self.R[0]*self.var2*self.var2
+            self.lamb3      =   self.R[0]*self.var3*self.var3
             
-            self.u2_init    =   3.
-            self.u3_init    =   2.
+            self.u2_init    =   1
+            self.u3_init    =   1.
                      
             
         elif self.MPPI_type == 2:
@@ -68,29 +61,17 @@ class MPPI_Parameter():
             
             self.flag_cost_calc     =   0
             #.. Parameters - low performance && short computation
-            # self.dt     =   0.02
-            # self.K      =   256 * 4
-            # self.N      =   250
-            # self.K      =   256
-            # self.dt     =   0.05
-            # self.N      =   70
-            # self.K      =   256 * 2
-            # self.dt     =   0.02
-            # self.N      =   175
-            # self.K      =   256
-            # self.dt     =   0.03
-            # self.N      =   100
+            self.K      =   256
+            self.dt     =   0.05
+            self.N      =   70
             self.nu     =   1000.       # 2.
             #.. u1: VTD, u2: desired_speed, u3: guid_eta
-            self.var1   =   1.0 * 0.2
-            # self.var1   =   1.0 * 0.1
-            # self.var1   =   1.0 * 0.5 * 6.0
+            self.var1   =   1.0 * 0.7
             self.var2   =   self.var1
             self.var3   =   self.var2
-            self.lamb1  =   1.0 * 1.0
-            # self.lamb1  =   1.0 * 0.5
-            self.lamb2  =   self.lamb1
-            self.lamb3  =   self.lamb1
+            self.lamb1  =   self.R[0] * self.var1* self.var1
+            self.lamb2  =   self.R[0] * self.var2* self.var2
+            self.lamb3  =   self.R[0] * self.var3* self.var3
             self.u1_init    =   0.
             self.u2_init    =   0.
             self.u3_init    =   0.
@@ -235,7 +216,7 @@ class GnC_Parameter():
         self.tau_phi    =   0.6
         self.tau_the    =   self.tau_phi
         self.tau_psi    =   self.tau_phi * 2.
-        self.del_psi_cmd_limit = 15. * m.pi/180.
+        self.del_psi_cmd_limit = 10. * m.pi/180.
                 
         self.tau_Wb     =   0.05 # in [https://www.research-collection.ethz.ch/bitstream/handle/20.500.11850/154099/eth-7387-01.pdf]
 

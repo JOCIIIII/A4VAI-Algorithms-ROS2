@@ -64,6 +64,11 @@ class Quadrotor_6DOF():
 
     #.. PF_required_info 
     def PF_required_info(self, WP_WPs, t_sim, dt):
+
+        # 20240914 diy 
+        # stop position of virtual target
+        tmp_VT_Ri = self.PF_var.VT_Ri
+
         self.PF_var.dist_to_path, self.PF_var.point_closest_on_path_i, self.PF_var.WP_idx_passed = path_following_required_info.distance_to_path(
             WP_WPs, self.PF_var.WP_idx_heading, self.state_var.Ri, self.PF_var.point_closest_on_path_i, self.PF_var.WP_idx_passed)
         self.PF_var.WP_idx_heading = path_following_required_info.check_waypoint(
@@ -72,21 +77,20 @@ class Quadrotor_6DOF():
             self.PF_var.dist_to_path, self.GnC_param.virtual_target_distance, self.PF_var.point_closest_on_path_i, self.PF_var.WP_idx_passed, WP_WPs)
         self.PF_var.VT_Ri = path_following_required_info.takeoff_to_first_WP(
             WP_WPs, self.state_var.Ri, self.PF_var.WP_idx_passed, self.GnC_param.dist_change_first_WP, self.PF_var.VT_Ri)
-        # # takeoff_to_first_WP
-        # dist_to_WP = np.linalg.norm(WP_WPs[1] - self.state_var.Ri)
-        # dist_change_WP = 0.3
-        # if (self.PF_var.WP_idx_passed < 1) and (dist_to_WP > dist_change_WP):
-        #     self.PF_var.VT_Ri = np.copy(WP_WPs[1])
-        #     pass            
+        
+        # 20240914 diy 
+        if (self.PF_var.stop_flag == 1):
+            self.PF_var.VT_Ri = tmp_VT_Ri
         
         # calc. cost
-        u = self.guid_var.T_cmd / self.physical_param.mass      
+        u = self.guid_var.MPPI_ctrl_input #np.reshape(self.guid_var.MPPI_ctrl_input,(-1))
+
         Rw1w2 = WP_WPs[self.PF_var.WP_idx_heading] - WP_WPs[self.PF_var.WP_idx_passed]
         self.PF_var.unit_Rw1w2 = Rw1w2 / np.linalg.norm(Rw1w2)
-        self.PF_var.cost_arr = path_following_required_info.cost_function_1(
-            self.MPPI_param.R[0], u, self.MPPI_param.Q[0], self.PF_var.dist_to_path, 
-            self.MPPI_param.Q[1], self.state_var.Vi, self.PF_var.unit_Rw1w2, self.MPPI_param.cost_min_V_aligned, dt)
-        if (self.PF_var.WP_idx_passed == 0) or (self.PF_var.WP_idx_heading == WP_WPs.shape[0] - 1):
+        self.PF_var.cost_arr = path_following_required_info.cost_function_1(self.GnC_param.Guid_type,
+            self.MPPI_param.R, u, self.MPPI_param.Q[0], self.PF_var.dist_to_path, 
+            self.MPPI_param.Q[1], self.state_var.att_ang, dt)
+        if (self.PF_var.WP_idx_passed == 0) or (self.PF_var.WP_idx_heading == WP_WPs.shape[0] - 1) or (self.PF_var.stop_flag == 1):
             self.PF_var.cost_arr = np.zeros(np.shape(self.PF_var.cost_arr))
             
         # save init. value for terminal cost
@@ -113,9 +117,9 @@ class Quadrotor_6DOF():
     def guid_Ai_cmd(self, WP_WPs_shape0, MPPI_ctrl_input):
         self.guid_var.Ai_cmd, self.GnC_param.desired_speed_test = guidance_path_following.guidance_modules(
             self.GnC_param.Guid_type, self.PF_var.WP_idx_passed, self.PF_var.WP_idx_heading, WP_WPs_shape0,
-            self.PF_var.VT_Ri, self.state_var.Ri, self.state_var.Vi, self.state_var.Ai, self.GnC_param.desired_speed,
+            self.PF_var.VT_Ri, self.state_var.Ri, self.state_var.Vi, self.state_var.Ai, self.GnC_param.virtual_target_distance, self.GnC_param.desired_speed,
             self.GnC_param.Kp_vel, self.GnC_param.Kd_vel, self.GnC_param.Kp_speed, self.GnC_param.Kd_speed, self.GnC_param.guid_eta,
-            MPPI_ctrl_input)
+            MPPI_ctrl_input, self.PF_var.stop_flag)
         pass
     
     #.. guid_compensate_Ai_cmd
@@ -142,7 +146,7 @@ class Quadrotor_6DOF():
     #.. guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd
     def guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd(self, WP_WPs):
         self.guid_var.T_cmd, self.guid_var.norm_T_cmd, self.guid_var.att_ang_cmd = guidance_path_following.convert_Ai_cmd_to_thrust_and_att_ang_cmd(
-            self.guid_var.Ai_cmd_compensated, self.physical_param.mass, self.physical_param.T_max, 
+            self.state_var.cI_B, self.guid_var.Ai_cmd_compensated, self.physical_param.mass, self.physical_param.T_max, 
             WP_WPs, self.PF_var.WP_idx_heading, self.state_var.Ri, self.state_var.att_ang, self.GnC_param.del_psi_cmd_limit)
         pass
 

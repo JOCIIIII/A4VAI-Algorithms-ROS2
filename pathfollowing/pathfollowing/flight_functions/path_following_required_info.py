@@ -82,22 +82,22 @@ def takeoff_to_first_WP(WP_WPs, QR_Ri, QR_WP_idx_passed, dist_change_first_WP, V
 
 
 #.. cost_function_1
-def cost_function_1(R, u, Q0, dist_to_path, Q1, Vi, unit_W1W2, min_V_aligned, dt):
+def cost_function_1(Guid_type, R, u, Q0, dist_to_path, Q1, att_ang, dt):
     # uRu of LQR cost, set low value of norm(R)
-    uRu = u * R * u
+
+    if Guid_type == 3:
+        uRu = (u[1]*u[1]*R[1] + u[2]*u[2]*R[2])
+    else:
+        uRu = (u[0]*u[0]*R[0] + u[1]*u[1]*R[1] + u[2]*u[2]*R[2])
+        pass
     
     # path following performance
     x0 = dist_to_path
-    # x0Q0x0 = x0 * Q0 * x0
-    x0Q0x0 = x0 * Q0 * x0 * x0 * x0 * x0 * x0
-    
-    # energy consumption efficiency 
-    # V_aligned = max(np.dot(unit_W1W2, Vi), min_V_aligned)
-    # V_aligned = max(np.dot(Vi, Vi), min_V_aligned)
-    V_aligned = m.exp(0.5 * np.dot(unit_W1W2, Vi)) + min_V_aligned
-    x1 = 1. / V_aligned
-    x1Q1x1 = x1 * Q1
-    # x1Q1x1 = x1 * Q1 * x1
+    x0Q0x0 = x0 * Q0 * x0
+
+    # attitude control stability
+    x1 = np.sqrt(att_ang[0]*att_ang[0]+att_ang[1]*att_ang[1])
+    x1Q1x1 = x1 * Q1 * x1
     
     # total cost
     cost_arr = np.array([uRu, x0Q0x0, x1Q1x1]) * dt

@@ -28,6 +28,13 @@ class Waypoint():
         pass
     
     def set_values(self, wp_type_selection, wpx, wpy, wpz):
+
+        # 20240914 diy
+        #.. regenerated WPs for test
+        h1      =   10.   
+        h2      =   10.         
+        self.reWPs     =   np.array([ [55, 30, -h1], [55, 55, -h2], [25, 55, -h1], [25, 30, -h1], [10, 40, -h1]])
+
         #.. straight line
         if wp_type_selection == 0:
             d       =   1500.
@@ -36,8 +43,8 @@ class Waypoint():
             self.WPs     =   np.array([ [0, 0, -h1], [wp0, 0., -h1], [d-wp0, 0., -h1], [d, 0., -h1] ])
         #.. rectangle
         elif wp_type_selection == 1:
+            # d       =   35
             d       =   35
-            # d       =   55
             wp0     =   5.
             h1      =   10.
             h2      =   10.
