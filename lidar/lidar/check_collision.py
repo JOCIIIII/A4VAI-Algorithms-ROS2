@@ -1,18 +1,10 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
-from rclpy.qos import qos_profile_sensor_data
-from rclpy.clock import Clock
-from .data_class import StateVariable, ModeFlag
+from .data_class import ModeFlag
 
 import numpy as np
-from px4_msgs.msg import VehicleLocalPosition
 from std_msgs.msg import Float32MultiArray
-from geometry_msgs.msg import Point
-from std_msgs.msg import Byte
 
-
-from .common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
 from custom_msgs.msg import StateFlag
 
 class CollisionAvoidanceNode(Node):
@@ -38,10 +30,6 @@ class CollisionAvoidanceNode(Node):
         # flag publisher
         self.flag_publisher = self.create_publisher(StateFlag, '/mode_flag2control', 1)
         self.obstacle_publisher_ = self.create_publisher(Float32MultiArray, '/obstacle', 1)
-
-
-        # # temp waypoint publisher
-        # self.temp_waypoint_publisher = self.create_publisher(Point, '/temp_waypoint', 1)
 
     def obstacle_callback(self, msg):
         # self.get_logger().info(f"is_pf: {self.mode_flag.is_pf}, is_ca: {self.mode_flag.is_ca}")
@@ -98,26 +86,6 @@ class CollisionAvoidanceNode(Node):
         print(f"CA: is_pf: {msg.is_pf}, is_ca: {msg.is_ca}")
         self.flag_publisher.publish(msg)
     
-
-
-    # def generate_waypoint(self):
-    #     # 현재 위치 및 yaw 가져오기
-    #     x0, y0, z0 = self.state_var.x, self.state_var.y, self.state_var.z
-    #     yaw = self.heading
-
-    #     # 7미터 전방 웨이포인트 계산
-    #     wx = x0 + 10 * np.cos(yaw)
-    #     wy = y0 + 10 * np.sin(yaw)
-    #     wz = z0  # 고도는 유지
-
-    #     # 웨이포인트 퍼블리싱
-    #     waypoint = Point()
-    #     waypoint.x = wx
-    #     waypoint.y = wy
-    #     waypoint.z = wz
-    #     self.temp_waypoint_publisher.publish(waypoint)
-    #     self.get_logger().info(f"Waypoint published: N={wx}, E={wy}, D={wz}")
-
 def main(args=None):
     rclpy.init(args=args)
     collision_avoidance_node = CollisionAvoidanceNode()

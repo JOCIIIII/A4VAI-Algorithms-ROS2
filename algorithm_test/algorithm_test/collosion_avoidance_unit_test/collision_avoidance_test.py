@@ -13,8 +13,8 @@ from rclpy.clock import Clock
 from px4_msgs.msg import TrajectorySetpoint
 
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, BodytoNED, set_wp
-from ..lib.publish_function import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.publisher import PX4Publisher, HeartbeatPublisher, PlotterPublisher, WaypointPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.subscriber import PX4Subscriber, CmdSubscriber, HeartbeatSubscriber, MissionSubscriber
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
 # ----------------------------------------------------------------------------------------#

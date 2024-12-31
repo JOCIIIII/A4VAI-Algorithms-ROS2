@@ -4,19 +4,15 @@ from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Float32MultiArray
 from sensor_msgs_py import point_cloud2
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from rclpy.qos    import qos_profile_sensor_data
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from .data_class import StateVariable
 from .subscriber import PX4Subscriber
-from px4_msgs.msg import VehicleLocalPosition
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import Pose
-from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import MarkerArray
 
 class LidarProcessor(Node):
     def __init__(self):

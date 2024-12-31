@@ -9,10 +9,10 @@ import rclpy
 from rclpy.node import Node
 
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
-from ..lib.publish_function import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
 from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, EtcSubscriber
 from ..lib.publisher import PX4Publisher, HeartbeatPublisher, WaypointPublisher, PlotterPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 
 class PathFollowingTest(Node):
     def __init__(self):
@@ -24,10 +24,6 @@ class PathFollowingTest(Node):
         set_initial_variables(self, dir, sim_name)
         
         self.offboard_mode.attitude = True
-
-        # test mode 
-        # 1 : normal, 2 : wp change
-        self.test_mode = 2
         # endregion
         # ----------------------------------------------------------------------------------------#
         # region PUBLISHERS

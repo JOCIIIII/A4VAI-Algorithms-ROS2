@@ -10,10 +10,10 @@ from rclpy.node import Node
 from rclpy.clock import Clock
 
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
-from ..lib.publish_function import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
-from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, HeartbeatSubscriber, MissionSubscriber, EtcSubscriber
+from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, HeartbeatSubscriber, EtcSubscriber
 from ..lib.publisher import PX4Publisher, HeartbeatPublisher, WaypointPublisher, PlotterPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.data_class import *
 
 
@@ -78,10 +78,6 @@ class CAPFIntegrationTest(Node):
         self.sub_flag.declareConveyLocalWaypointCompleteSubscriber(self.mode_flag)
         self.sub_flag.declarePFCompleteSubscriber(self.mode_flag)
         # self.waypoint_subscribe = self.create_subscription(Point, "/temp_waypoint", self.waypoint_callback, 1)
-
-        self.sub_mission = MissionSubscriber(self)
-        # self.sub_mission.declareLidarSubscriber(self.state_var, self.guid_var, self.mode_flag, self.ca_var, self.pub_func_waypoint)
-        # self.sub_mission.declareDepthSubscriber(self.mode_flag, self.ca_var)
 
         self.sub_etc = EtcSubscriber(self)
         self.sub_etc.declareHeadingWPIdxSubscriber(self.guid_var)
