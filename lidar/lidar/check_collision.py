@@ -23,7 +23,7 @@ class CollisionAvoidanceNode(Node):
 
         self.flag_subscription = self.create_subscription(
             StateFlag,
-            '/mode_flag2collision',
+            '/mode_flag_to_CC',
             self.flag_callback,
             1
         )

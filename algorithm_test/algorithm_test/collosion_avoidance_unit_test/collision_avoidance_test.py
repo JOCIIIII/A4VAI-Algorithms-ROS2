@@ -13,8 +13,8 @@ from rclpy.clock import Clock
 from px4_msgs.msg import TrajectorySetpoint
 
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, BodytoNED, set_wp
-from ..lib.publisher import PX4Publisher, HeartbeatPublisher, PlotterPublisher, WaypointPublisher
-from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
+from ..lib.publisher import PX4Publisher, HeartbeatPublisher, PlotterPublisher, ModulePublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncModule, PubFuncPlotter
 from ..lib.subscriber import PX4Subscriber, CmdSubscriber, HeartbeatSubscriber, MissionSubscriber
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
 # ----------------------------------------------------------------------------------------#
@@ -39,8 +39,8 @@ class CollisionAvoidanceTest(Node):
         self.pub_px4.declareOffboardControlModePublisher()
         self.pub_px4.declareTrajectorySetpointPublisher()
 
-        self.pub_waypoint = WaypointPublisher(self)
-        self.pub_waypoint.declareLocalWaypointPublisherToPF()
+        self.pub_module = ModulePublisher(self)
+        self.pub_module.declareLocalWaypointPublisherToPF()
 
         self.pub_heartbeat = HeartbeatPublisher(self)
         self.pub_heartbeat.declareControllerHeartbeatPublisher()
@@ -58,7 +58,7 @@ class CollisionAvoidanceTest(Node):
         # region PUB FUNC
         self.pub_func_heartbeat = PubFuncHeartbeat(self)
         self.pub_func_px4       = PubFuncPX4(self)
-        self.pub_func_waypoint  = PubFuncWaypoint(self)
+        self.pub_func_module  = PubFuncModule(self)
         self.pub_func_plotter   = PubFuncPlotter(self)
         # endregion
         # ----------------------------------------------------------------------------------------#
@@ -71,7 +71,7 @@ class CollisionAvoidanceTest(Node):
         self.sub_cmd.declareCAVelocitySetpointSubscriber(self.veh_vel_set, self.state_var, self.ca_var)
 
         self.sub_mission = MissionSubscriber(self)
-        self.sub_mission.declareLidarSubscriber(self.state_var, self.guid_var, self.mode_flag, self.ca_var, self.pub_func_waypoint)
+        self.sub_mission.declareLidarSubscriber(self.state_var, self.guid_var, self.mode_flag, self.ca_var, self.pub_func_module)
         self.sub_mission.declareDepthSubscriber(self.mode_flag, self.ca_var)
 
         self.sub_hearbeat = HeartbeatSubscriber(self)

@@ -1,681 +1,252 @@
-# Library
-# library for ros2
+# Librarys
+
+# Library for common
+import numpy as np
+import os
+
+# ROS libraries
 import rclpy
 from rclpy.node import Node
-from rclpy.clock import Clock
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
-from datetime import datetime
+# Custom libraries
+from .lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter
+from .lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
+from .lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, HeartbeatSubscriber, EtcSubscriber
+from .lib.publisher import PX4Publisher, HeartbeatPublisher, ModulePublisher, PlotterPublisher
+from .lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncModule, PubFuncPlotter
 
-import math
-import numpy as np
+# custom message
+from custom_msgs.msg import StateFlag
+from custom_msgs.msg import GlobalWaypointSetpoint, LocalWaypointSetpoint
+# ----------------------------------------------------------------------------------------#
 
-from px4_msgs.msg import VehicleCommand, OffboardControlMode , TrajectorySetpoint, VehicleAttitudeSetpoint
-from px4_msgs.msg import VehicleLocalPosition , VehicleAttitude, VehicleAngularVelocity, VehicleStatus, VehicleGlobalPosition
-
-from custom_msgs.msg import LocalWaypointSetpoint, ConveyLocalWaypointComplete
-from geometry_msgs.msg import Twist 
-from sensor_msgs.msg import PointCloud2
-
-from std_msgs.msg import Bool
-from std_msgs.msg import Float32
-from sensor_msgs.msg import Image
-
-from .give_global_waypoint import GiveGlobalWaypoint
-from .commonFcn import *
-from .initVar import *
-from sensor_msgs_py import point_cloud2
-
-class Controller(Node):
+class CAPFIntegrationTest(Node):
     def __init__(self):
-        super().__init__('controller')
-
-        setInitialVariables(self)
-
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # region SUBSCRIBERS
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # region FROM PX4-AUTOPILOT
-        # -----------------------------------------------------------------------------------------------------------------
-        self.vehicle_local_position_subscriber = self.create_subscription(
-            VehicleLocalPosition,
-            '/fmu/out/vehicle_local_position',
-            self.vehicle_local_position_callback,
-            self.qos_profile
-        )
-        self.vehicle_attitude_subscriber = self.create_subscription(
-            VehicleAttitude,
-            '/fmu/out/vehicle_attitude',
-            self.vehicle_attitude_callback,
-            self.qos_profile
-        )
-        self.vehicle_angular_velocity_subscriber = self.create_subscription(
-            VehicleAngularVelocity,
-            '/fmu/out/vehicle_angular_velocity',
-            self.vehicle_angular_velocity_callback,
-            self.qos_profile
-        )
-        self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus,
-            '/fmu/out/vehicle_status',
-            self.vehicle_status_callback,
-            self.qos_profile
-        )
-        # endregion
-        # -----------------------------------------------------------------------------------------------------------------
-
-
-        # region FROM ALGORITHM 1: PATH PLANNER
-        # -----------------------------------------------------------------------------------------------------------------
-        self.local_waypoint_subscriber = self.create_subscription(
-            LocalWaypointSetpoint,\
-            '/local_waypoint_setpoint_from_PP',\
-            self.path_planning_call_back,\
-            10)
-        self.path_planning_heartbeat_subscriber = self.create_subscription(
-            Heartbeat,
-            '/path_planning_heartbeat',
-            self.path_planning_heartbeat_call_back,
-            10
-        )
-        # endregion
-        # -----------------------------------------------------------------------------------------------------------------
+        super().__init__("ca_pf_integ_test")
+        # ----------------------------------------------------------------------------------------#
+        # region INITIALIZE
+        dir = os.path.dirname(os.path.abspath(__file__))
+        sim_name = "ca_pf_integ_test"
+        set_initial_variables(self, dir, sim_name)
         
+        self.offboard_mode.attitude = True
 
-        # region FROM ALGORITHM 2: PATH FOLLOWER
-        # -----------------------------------------------------------------------------------------------------------------
-        self.PF_attitude_setpoint_subscriber_ = self.create_subscription(
-            VehicleAttitudeSetpoint,
-            '/pf_att_2_control',
-            self.PF_Att2Control_callback,
-            10
-        )
-        self.convey_local_waypoint_complete_subscriber = self.create_subscription(
-            ConveyLocalWaypointComplete,
-            '/convey_local_waypoint_complete',
-            self.convey_local_waypoint_complete_call_back,
-            10
-        ) 
-        self.path_following_heartbeat_subscriber = self.create_subscription(
-            Heartbeat,
-            '/path_following_heartbeat',
-            self.path_following_heartbeat_call_back,
-            10
-        )
-        # endregion
-        # -----------------------------------------------------------------------------------------------------------------
-
-
-        # region FROM ALGORITHM 3: COLLISION AVOIDANCE
-        # -----------------------------------------------------------------------------------------------------------------
-        self.CA_velocity_setpoint_subscriber_ = self.create_subscription(
-            Twist,
-            '/ca_vel_2_control',
-            self.CA2Control_callback,
-            10
-        )
-        self.collision_avoidance_heartbeat_subscriber = self.create_subscription(
-            Heartbeat,
-            '/collision_avoidance_heartbeat',
-            self.collision_avoidance_heartbeat_call_back,
-            10
-        )
-        # endregion
-        # -----------------------------------------------------------------------------------------------------------------
-
-
-        # region MISCELLANEOUS SUBSRIBERS
-        # -----------------------------------------------------------------------------------------------------------------
-
-        self.DepthSubscriber_ = self.create_subscription(
-            Image,
-            '/depth/raw',
-            self.DepthCallback,
-            1
-            )
+        #------------------------------------------------------------------------------------------------#
+        # input: start_point, goal_point
+        # set start and goal point
+        self.start_point = [50.0, 50.0, 5.0]
+        self.goal_point = [950.0, 950.0, 5.0]
+        #------------------------------------------------------------------------------------------------#
         
-        # self.LidarSubscriber_ = self.create_subscription(
-        #     PointCloud2,
-        #     '/airsim_node/SimpleFlight/lidar/RPLIDAR_A3',
-        #     self.LidarCallback,
-        #     QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
-        # )
         # endregion
-        # -----------------------------------------------------------------------------------------------------------------
-        # endregion
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # -----------------------------------------------------------------------------------------#
         # region PUBLISHERS
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # region TO PX4-AUTOPILOT
-        # -----------------------------------------------------------------------------------------------------------------
-        self.vehicle_command_publisher = self.create_publisher(
-            VehicleCommand,
-            '/fmu/in/vehicle_command',
-            self.qos_profile
-        )
-        self.offboard_control_mode_publisher = self.create_publisher(
-            OffboardControlMode,
-            '/fmu/in/offboard_control_mode',
-            self.qos_profile
-        )
-        self.trajectory_setpoint_publisher = self.create_publisher(
-            TrajectorySetpoint,
-            '/fmu/in/trajectory_setpoint',
-            self.qos_profile
-        )
-        self.vehicle_attitude_setpoint_publisher = self.create_publisher(
-            VehicleAttitudeSetpoint,
-            '/fmu/in/vehicle_attitude_setpoint',
-            self.qos_profile
-        )
+        # PX4 publisher
+        self.pub_px4 = PX4Publisher(self)
+        self.pub_px4.declareVehicleCommandPublisher()
+        self.pub_px4.declareOffboardControlModePublisher()
+        self.pub_px4.declareVehicleAttitudeSetpointPublisher()
+        self.pub_px4.declareTrajectorySetpointPublisher()
+        # module data publisher
+        self.pub_module = ModulePublisher(self)
+        self.pub_module.declareLocalWaypointPublisherToPF()
+        self.pub_module.declareModeFlagPublisherToCC()
+        self.pub_global_waypoint = self.create_publisher(GlobalWaypointSetpoint, "/global_waypoint_setpoint", 1)
+        self.sub_local_waypoint = self.create_subscription(LocalWaypointSetpoint, "/local_waypoint_setpoint_from_PP", self.local_waypoint_callback, 1)
+
+        self.sub_flag = self.create_subscription(StateFlag, '/mode_flag2control', self.flag_callback, 1)
+        # heartbeat publisher
+        self.pub_heartbeat = HeartbeatPublisher(self)
+        self.pub_heartbeat.declareControllerHeartbeatPublisher()
+        # plotter publisher
+        self.pub_plotter = PlotterPublisher(self)
+        self.pub_plotter.declareGlobalWaypointPublisherToPlotter()
+        self.pub_plotter.declareLocalWaypointPublisherToPlotter()
+        self.pub_plotter.declareHeadingPublisherToPlotter()
+        self.pub_plotter.declareStatePublisherToPlotter()
+        self.pub_plotter.declareMinDistancePublisherToPlotter()
         # endregion
-        # -----------------------------------------------------------------------------------------------------------------
-
-
-        # region TO ALGORITHM 2: PATH FOLLOWER
-        # -----------------------------------------------------------------------------------------------------------------
-        self.local_waypoint_publisher = self.create_publisher(
-            LocalWaypointSetpoint,
-            '/local_waypoint_setpoint_to_PF',
-            10
-        )
-        self.heartbeat_publisher = self.create_publisher(
-            Heartbeat,
-            '/controller_heartbeat',
-            10
-        )
-        self.waypoint_convert_flag_publisher = self.create_publisher(
-            Bool,
-            '/waypoint_convert_flag',
-            10
-        )
-        self.state_publisher = self.create_publisher(
-            Bool,
-            '/controller_state',
-            10
-        )
-
-        self.min_distance_publisher = self.create_publisher(
-            Float32,
-            '/min_distance',
-            10
-        )
-
-        self.heading_publisher = self.create_publisher(
-            Float32,
-            '/heading',
-            10
-        )
+        # ----------------------------------------------------------------------------------------#
+        # region PUB FUNC
+        self.pub_func_heartbeat = PubFuncHeartbeat(self)
+        self.pub_func_px4       = PubFuncPX4(self)
+        self.pub_func_module  = PubFuncModule(self)
+        self.pub_func_plotter   = PubFuncPlotter(self)
         # endregion
-        # -----------------------------------------------------------------------------------------------------------------
+        # ----------------------------------------------------------------------------------------#
+        # region SUBSCRIBERS
+        self.sub_px4 = PX4Subscriber(self)
+        self.sub_px4.declareVehicleLocalPositionSubscriber(self.state_var)
+        self.sub_px4.declareVehicleAttitudeSubscriber(self.state_var)
+
+        self.sub_cmd = CmdSubscriber(self)
+        self.sub_cmd.declarePFAttitudeSetpointSubscriber(self.veh_att_set)
+        self.sub_cmd.declareCAVelocitySetpointSubscriber(self.veh_vel_set, self.state_var, self.ca_var)
+
+        self.sub_flag = FlagSubscriber(self)
+        self.sub_flag.declareConveyLocalWaypointCompleteSubscriber(self.mode_flag)
+        self.sub_flag.declarePFCompleteSubscriber(self.mode_flag)
+
+        self.sub_etc = EtcSubscriber(self)
+        self.sub_etc.declareHeadingWPIdxSubscriber(self.guid_var)
+
+        self.sub_hearbeat = HeartbeatSubscriber(self)
+        self.sub_hearbeat.declareCollisionAvoidanceHeartbeatSubscriber(self.offboard_var)
+        self.sub_hearbeat.declarePathFollowingHeartbeatSubscriber(self.offboard_var)
+        self.sub_hearbeat.declarePathPlanningHeartbeatSubscriber(self.offboard_var)
         # endregion
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # ----------------------------------------------------------------------------------------#
+        # region TIMER
+        self.timer_offboard_control = MainTimer(self, self.offboard_var)
+        self.timer_offboard_control.declareOffboardControlTimer(self.offboard_control_main)
 
+        self.timer_cmd = CommandPubTimer(self, self.offboard_var)
+        self.timer_cmd.declareOffboardAttitudeControlTimer(self.mode_flag, self.veh_att_set, self.pub_func_px4)
+        self.timer_cmd.declareOffboardVelocityControlTimer(self.mode_flag, self.veh_vel_set, self.pub_func_px4)
 
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # region TIMERS
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # algorithm timer
-        period_heartbeat_mode  =   1        
-        self.heartbeat_timer   =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
-
-        period_offboard_control_mode =   0.2         # required about 5Hz for attitude control (proof that the external controller is healthy
-        self.offboard_main_timer     =   self.create_timer(period_offboard_control_mode, self.offboard_control_main)
-
-        period_offboard_att_ctrl  =   0.004        # required 250Hz at least for attitude control
-        self.attitude_control_call_timer =  self.create_timer(period_offboard_att_ctrl, self.publisher_vehicle_attitude_setpoint)
-
-        period_offboard_vel_ctrl  =   0.02         # required 50Hz at least for velocity control
-        self.velocity_control_call_timer =  self.create_timer(period_offboard_vel_ctrl, self.publish_vehicle_velocity_setpoint)
-
-        timer_period = 0.1
-        self.collision_avidance_timer   = self.create_timer(timer_period, self.timer_callback)
+        self.timer_heartbeat = HeartbeatTimer(self, self.offboard_var, self.pub_func_heartbeat)
+        self.timer_heartbeat.declareControllerHeartbeatTimer()
         # endregion
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    # main code
+    # --------------------------------------------------------------------------------------------#
+    # region MAIN CODE
     def offboard_control_main(self):
-        # check another module nodes alive
-        if self.path_following_heartbeat == True and self.path_planning_heartbeat == True and self.collision_avoidance_heartbeat == True:
-            # send offboard mode and arm mode command to px4
-            if self.offboard_setpoint_counter == self.offboard_start_flight_time :
-                # offboard mode cmd to px4
-                self.publish_vehicle_command(self.prm_offboard_mode)
+        # self.get_logger().info(str(self.guid_var.waypoint_x))
+        if self.offboard_var.ca_heartbeat == True and self.offboard_var.pf_heartbeat == True and self.offboard_var.pp_heartbeat == True:
+            
+            if self.offboard_var.counter == self.offboard_var.flight_start_time and self.mode_flag.is_takeoff == False:
                 # arm cmd to px4
-                self.publish_vehicle_command(self.prm_arm_mode)
-    
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_arm_mode)
+                # offboard mode cmd to px4
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_takeoff_mode)
+
             # takeoff after a certain period of time
-            elif self.offboard_setpoint_counter <= self.offboard_start_flight_time:
-                self.offboard_setpoint_counter += 1
-    
-            # send offboard heartbeat signal to px4 
-            self.publish_offboard_control_mode(self.prm_off_con_mod)
-            self.publish_heading()
-            # check initial position
-            if self.initial_position_flag == True:
+            elif self.offboard_var.counter <= self.offboard_var.flight_start_time:
+                self.offboard_var.counter += 1
+
+            # check if the vehicle is ready to initial position
+            if self.mode_flag.is_takeoff == False and self.state_var.z > self.guid_var.init_pos[2]:
+                self.mode_flag.is_takeoff = True
+                self.mode_flag.is_pp_mode = True
+                self.get_logger().info('Vehicle is reached to initial position')
+
+            # if the vehicle was taken off send local waypoint to path following and wait in position mode
+            if self.mode_flag.is_takeoff == True and self.mode_flag.pf_recieved_lw == False:
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_position_mode)
+                self.global_waypoint_publish(self.start_point, self.goal_point)
+
+            if self.mode_flag.pf_recieved_lw == True and self.mode_flag.is_offboard == False:
+                self.mode_flag.is_pp_mode = False
+                self.mode_flag.is_offboard = True
+                self.mode_flag.is_pf = True
+                self.get_logger().info('Vehicle is in offboard mode')
+
+            # check if path following is recieved the local waypoint
+            if self.mode_flag.is_offboard == True and self.mode_flag.pf_done == False:
+                publish_to_plotter(self)
+                self.pub_func_module.publish_flags()
+
+                if self.mode_flag.is_pf == True:
+                    self.offboard_mode.attitude = True
+                    self.offboard_mode.velocity = False
                 
-                # stay initial position untill transmit local waypoint to path following is complete
-                if self.convey_local_waypoint_is_complete == False:
-                    self.takeoff_and_go_initial_position()
-    
-                    # check path planning complete
-                    if self.path_planning_complete == False:
-                    
-                        # give global waypoint to path planning and path planning start
-                        give_global_waypoint = GiveGlobalWaypoint()
-                        give_global_waypoint.global_waypoint_publish(self.start_point, self.goal_point)
-                        give_global_waypoint.destroy_node()
-                    else:
-                        # send local waypoint to pathfollowing
-                        self.local_waypoint_publish()
-                    
-                # do path following if local waypoint transmit to path following is complete 
-                else:
-                    self.publish_state()
-                    if self.obstacle_flag == False:
+                if self.mode_flag.is_ca == True:
+                    self.offboard_mode.attitude = False
+                    self.offboard_mode.velocity = True
 
-                        self.collision_avoidance_flag   =   False
-                        self.prm_off_con_mod.position   =   False
-                        self.prm_off_con_mod.velocity   =   False
-                        self.prm_off_con_mod.attitude   =   True
-                        self.publish_offboard_control_mode(self.prm_off_con_mod)
-                        self.path_following_flag        =   True
-                        
-                        self.collision_avoidance_end_timer    =   True
-                    else:
-                        self.collision_avoidance_flag   =   True
-                        self.path_following_flag        =   False
-                        self.prm_off_con_mod.position   =   False
-                        self.prm_off_con_mod.velocity   =   True
-                        self.prm_off_con_mod.attitude   =   False
-                        self.publish_offboard_control_mode(self.prm_off_con_mod)
-                        
-                        self.collision_avoidance_end_timer   =   False
-                        self.collision_avoidance_timer_running    =   False
+                self.pub_func_px4.publish_offboard_control_mode(self.offboard_mode)
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_offboard_mode)
+                
+            if self.mode_flag.pf_done == True and self.mode_flag.is_landed == False:
+                self.mode_flag.is_offboard = False
+                self.mode_flag.is_pf = False
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_land_mode)
 
-                        if self.collision_avidance_elapsed_time < 6:
-                            self.publish_waypoint_convert_flag()                        
-                        
-                        
-    
-            # go initial position if not in initial position 
-            else:
-                self.veh_trj_set.pos_NED    =   self.initial_position
-                self.takeoff_and_go_initial_position()
-        else:
-            pass
+                # check if the vehicle is landed
+                if np.abs(self.state_var.vz_n) < 0.05 and np.abs(self.state_var.z < 0.05):
+                    self.mode_flag.is_landed = True
+                    self.get_logger().info('Vehicle is landed')
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # region callback Functions
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # region 1. path planning callback Functions
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # subscribe local waypoint and path planning complete flag
-    def path_planning_call_back(self, msg):
-        self.path_planning_complete = msg.path_planning_complete 
-        self.waypoint_x             = msg.waypoint_x 
-        self.waypoint_y             = msg.waypoint_y
-        self.waypoint_z             = msg.waypoint_z
-        print("                                          ")
-        print("=====   Path Planning Complete!!     =====")
-        print("                                          ")
-
-    # heartbeat subscribe from path planning
-    def path_planning_heartbeat_call_back(self,msg):
-        self.path_planning_heartbeat = msg.heartbeat
-
+            # if the vehicle is landed, disarm the vehicle
+            if self.mode_flag.is_landed == True and self.mode_flag.is_disarmed == False:
+                self.pub_func_px4.publish_vehicle_command(self.modes.prm_disarm_mode)    
+                self.mode_flag.is_disarmed = True
+                self.get_logger().info('Vehicle is disarmed')  
+            # self.get_logger().info(str(self.ca_var.depth_min_distance))
+            state_logger(self)
     # endregion
-    # -----------------------------------------------------------------------------------------------------------------
 
-    # region 2. path following callback Functions
-    # -----------------------------------------------------------------------------------------------------------------
+    def flag_callback(self, msg):
+        # self.get_logger().info(f"Flag received: is_pf: {msg.is_pf}, is_ca: {msg.is_ca}") 씨발 누가 쏘는거야
+        self.mode_flag.is_ca = msg.is_ca
+        self.mode_flag.is_pf = msg.is_pf
+        if self.mode_flag.is_pf == True:
+            self.get_logger().info("is_pf is True")
+            z = self.guid_var.waypoint_z[self.guid_var.cur_wp]
+            self.guid_var.waypoint_x = self.guid_var.waypoint_x[self.guid_var.cur_wp:]
+            self.guid_var.waypoint_y = self.guid_var.waypoint_y[self.guid_var.cur_wp:]
+            self.guid_var.waypoint_z = self.guid_var.waypoint_z[self.guid_var.cur_wp:]
 
-    # subscribe convey local waypoint complete flag from path following
-    def convey_local_waypoint_complete_call_back(self, msg):
-        self.convey_local_waypoint_is_complete = msg.convey_local_waypoint_is_complete
+            # self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, msg.x))
+            # self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, msg.y))
+            # self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, z))
 
-    # heartbeat subscribe from path following
-    def path_following_heartbeat_call_back(self,msg):
-        self.path_following_heartbeat = msg.heartbeat
+            self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, self.state_var.x))
+            self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, self.state_var.x))
+            self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, self.state_var.y))
+            self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, self.state_var.y))
+            self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, self.state_var.z))
+            self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, self.state_var.z))
 
-    # update attitude offboard command from path following
-    def PF_Att2Control_callback(self, msg):
-        self.veh_att_set.roll_body          =   msg.roll_body
-        self.veh_att_set.pitch_body         =   msg.pitch_body
-        self.veh_att_set.yaw_body           =   msg.yaw_body
-        self.veh_att_set.yaw_sp_move_rate   =   msg.yaw_sp_move_rate
-        self.veh_att_set.q_d[0]             =   msg.q_d[0]
-        self.veh_att_set.q_d[1]             =   msg.q_d[1]
-        self.veh_att_set.q_d[2]             =   msg.q_d[2]
-        self.veh_att_set.q_d[3]             =   msg.q_d[3]
-        self.veh_att_set.thrust_body[0]     =   msg.thrust_body[0]
-        self.veh_att_set.thrust_body[1]     =   msg.thrust_body[1]
-        self.veh_att_set.thrust_body[2]     =   msg.thrust_body[2]
-    
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
+            self.guid_var.real_wp_x = self.guid_var.waypoint_x
+            self.guid_var.real_wp_y = self.guid_var.waypoint_y
+            self.guid_var.real_wp_z = self.guid_var.waypoint_z
 
-    # region 3. collision avoidance callback Functions
-    # -----------------------------------------------------------------------------------------------------------------
+            self.pub_func_module.local_waypoint_publish(False)
+    def global_waypoint_publish(self, start_point, goal_point):
+        msg = GlobalWaypointSetpoint()
+        msg.start_point = start_point
+        msg.goal_point = goal_point
+        self.pub_global_waypoint.publish(msg)
 
-    def collision_avoidance_heartbeat_call_back(self,msg):
-        self.collision_avoidance_heartbeat = msg.heartbeat
-    
-    def CA2Control_callback(self, msg):
-        # update Body velocity CMD
-        # self.veh_trj_set.vel_NED[0]            =   msg.linear.x
-        # self.veh_trj_set.vel_NED[1]            =   msg.linear.y
-        # self.veh_trj_set.vel_NED[2]            =   msg.linear.z
-        # self.veh_trj_set.yaw_vel_rad   =   msg.angular.z
+    def local_waypoint_callback(self, msg):
+        if self.mode_flag.pf_recieved_lw == False:
 
-        self.vel_cmd_body_x            =   msg.linear.x
-        self.vel_cmd_body_y            =   msg.linear.y
-        self.vel_cmd_body_z            =   msg.linear.z
-        self.veh_trj_set.yaw_vel_rad   =   msg.angular.z
-
-        self.DCM_nb = DCM(self.phi, self.theta, self.psi)
-        self.DCM_bn = np.transpose(self.DCM_nb)
-        BodytoNED(self)
-
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-    
-    # region 4. px4 callback Functions
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # update position and velocity
-    def vehicle_local_position_callback(self, msg):
-        # update NED position 
-        self.x      =   msg.x
-        self.y      =   msg.y
-        self.z      =   msg.z
-        # update NED velocity
-        self.v_x    =   msg.vx
-        self.v_y    =   msg.vy
-        self.v_z    =   msg.vz
-        self.vehicle_heading = msg.heading
-
-
-    # update attitude
-    def vehicle_attitude_callback(self, msg):
-        self.psi , self.theta, self.phi     =   Quaternion2Euler(self, msg.q[0], msg.q[1], msg.q[2], msg.q[3])
-     
-    # update body angular velocity
-    def vehicle_angular_velocity_callback(self, msg):
-        self.p    =   msg.xyz[0]
-        self.q    =   msg.xyz[1]
-        self.r    =   msg.xyz[2]
-    # update vehicle status
-    def vehicle_status_callback(self, vehicle_status):
-        self.vehicle_status = vehicle_status
-
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-    
-    # region 5. MISCELLANEOUS callback Functions
-    # -----------------------------------------------------------------------------------------------------------------
-    
-    def DepthCallback(self, msg):
-        image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-        try:
-            # Convert the ROS Image message to OpenCV format
-            image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-        except Exception as e:
-            return
-        
-
-        valid_mask = valid_mask = (image < 100) & (image > 0.5)
-
-        valid_depths = image[valid_mask]
-
-        self.min_distance = valid_depths.min()
-        self.publish_min_distance()
-        
-        if self.min_distance < 3.0:
-            self.obstacle_check = True
-        else:
-            self.obstacle_flag = False
-
-        if self.obstacle_check == True and self.min_distance < 4.0:
-            self.obstacle_flag = True
-        else:
-            self.obstacle_check = False
-            self.obstacle_flag = False
-
-
-    def LidarCallback(self, pc_msg):
-        if pc_msg.is_dense is True :
+            xy = np.array([msg.waypoint_x, msg.waypoint_y]) # [2 X N]
             
-            input =point_cloud2.read_points(pc_msg)
+            theta = np.pi/2
 
-            points_list = list(input)
+            dcm = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+            new_xy = dcm @ xy
 
-            point = np.array(points_list, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+            new_init_pos = dcm @ self.guid_var.init_pos[:2]
 
-            x = point['x']
-            y = point['y']
-            dist = np.sqrt(x **2 + y ** 2)
-        #     self.min_dist = np.min(dist)
-            
-        #     if self.z < -2.0:
-        #         if self.min_dist < 5.0:
-        #             self.obstacle_check = True
-        #         else : 
-        #             self.obstacle_flag = False
-                    
-        #         if self.obstacle_check == True and self.min_dist < 7.0:
-        #             self.obstacle_flag = True
-        #         else :
-        #             self.obstacle_check = False
-        #             self.obstacle_flag  = False
-        #     else :
-        #         self.obstacle_flag = False
-        # else : 
-        #     pass
+            self.get_logger().info(f'xy: {new_xy.shape}')
 
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-    # endregion
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            for i in range(len(msg.waypoint_x)):
+                self.guid_var.waypoint_x.append(float(new_xy[0, i]*400/1024 - new_init_pos[0]))
+                self.guid_var.waypoint_y.append(float(new_xy[1, i]*400/1024 - new_init_pos[1]))
+                self.guid_var.waypoint_z.append(float(msg.waypoint_z[i]) + 1) 
+            self.guid_var.real_wp_x = self.guid_var.waypoint_x
+            self.guid_var.real_wp_y = self.guid_var.waypoint_y
+            self.guid_var.real_wp_z = self.guid_var.waypoint_z
 
+            self.local_waypoint_publish()
+            self.mode_flag.pf_recieved_lw = True
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # region PUBLISHERS Functions
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # region 1. PUBLISHERS Functions to path following
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # publish local waypoint
+        self.get_logger().info('Local waypoint recieved from path planning')
     def local_waypoint_publish(self):
         msg = LocalWaypointSetpoint()
-        msg.path_planning_complete = self.path_planning_complete
-        msg.waypoint_x             = self.waypoint_x
-        msg.waypoint_y             = self.waypoint_y
-        msg.waypoint_z             = self.waypoint_z
-        self.local_waypoint_publisher.publish(msg)
-
-    # publish waypoint convert flag
-    def publish_waypoint_convert_flag(self):
-        msg = Bool()
-        msg.data = True
-        self.waypoint_convert_flag_publisher.publish(msg)
-        self.get_logger().info("------------------------------------------------------------------------------")
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("skip Next waypoint, elapsed time =" + str(self.collision_avidance_elapsed_time) )
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("                                                                              ")
-        self.get_logger().info("------------------------------------------------------------------------------")
-        self.collision_avidance_elapsed_time = 10
-        self.collision_avoidance_timer_running = False
-    
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # region 2. PUBLISHERS Functions to px4
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # publish_vehicle_command
-    def publish_vehicle_command(self, prm_veh_com):
-        msg                 =   VehicleCommand()
-        msg.param1          =   prm_veh_com.params[0]
-        msg.param2          =   prm_veh_com.params[1]
-        msg.command         =   prm_veh_com.CMD_mode
-        # values below are in [3]
-        msg.target_system   =   1
-        msg.target_component=   1
-        msg.source_system   =   1
-        msg.source_component=   1
-        msg.from_external   =   True
-        self.vehicle_command_publisher.publish(msg)
-
-    # publish offboard control mode
-    def publish_offboard_control_mode(self, prm_off_con_mod):
-        msg                 =   OffboardControlMode()
-        msg.position        =   prm_off_con_mod.position
-        msg.velocity        =   prm_off_con_mod.velocity
-        msg.acceleration    =   prm_off_con_mod.acceleration
-        msg.attitude        =   prm_off_con_mod.attitude
-        msg.body_rate       =   prm_off_con_mod.body_rate
-        self.offboard_control_mode_publisher.publish(msg)
-
-    # publish position offboard command
-    def publish_position_setpoint(self,veh_trj_set):
-        msg                 =   TrajectorySetpoint()
-        msg.timestamp = int(Clock().now().nanoseconds / 1000) # time in microseconds
-        msg.position        =   veh_trj_set.pos_NED
-        msg.yaw             =   veh_trj_set.yaw_rad
-        self.trajectory_setpoint_publisher.publish(msg)
-
-    # publish velocity offboard command
-    def publish_vehicle_velocity_setpoint(self):
-        if self.collision_avoidance_flag == True:
-            msg                 =   TrajectorySetpoint()
-            msg.timestamp = int(Clock().now().nanoseconds / 1000) # time in microseconds
-            msg.position        =   [np.NaN, np.NaN, np.NaN]
-            msg.yaw             =   np.NaN
-            msg.velocity        =   np.float32(self.veh_trj_set.vel_NED)
-            msg.yawspeed        =   self.veh_trj_set.yaw_vel_rad
-            self.trajectory_setpoint_publisher.publish(msg)
-   
-    # publish attitude offboard command
-    def publisher_vehicle_attitude_setpoint(self):
-        if self.path_following_flag == True:
-            msg                     =   VehicleAttitudeSetpoint()
-            msg.roll_body           =   self.veh_att_set.roll_body
-            msg.pitch_body          =   self.veh_att_set.pitch_body
-            msg.yaw_body            =   self.veh_att_set.yaw_body
-            msg.yaw_sp_move_rate    =   self.veh_att_set.yaw_sp_move_rate
-            msg.q_d[0]              =   self.veh_att_set.q_d[0]
-            msg.q_d[1]              =   self.veh_att_set.q_d[1]
-            msg.q_d[2]              =   self.veh_att_set.q_d[2]
-            msg.q_d[3]              =   self.veh_att_set.q_d[3]
-            msg.thrust_body[0]      =   0.
-            msg.thrust_body[1]      =   0.
-            msg.thrust_body[2]      =   self.veh_att_set.thrust_body[2]
-            self.vehicle_attitude_setpoint_publisher.publish(msg)
-        else:
-            pass
-
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-    
-    # region 3. MISCELLANEOUS PUBLISHERS Functions
-    # -----------------------------------------------------------------------------------------------------------------
-
-    # publish controller heartbeat signal to another module's nodes
-    def publish_heartbeat(self):
-        msg = Heartbeat()
-        msg.heartbeat = True
-        self.heartbeat_publisher.publish(msg)
-
-    def publish_state(self):
-        msg = Bool()
-        if self.obstacle_flag == True:
-            msg.data = True
-        else:
-            msg.data = False
-        self.state_publisher.publish(msg)
-
-    def publish_min_distance(self):
-        msg = Float32()
-        msg.data = float(self.min_distance)
-        self.min_distance_publisher.publish(msg)
-
-    def publish_heading(self):
-        msg = Float32()
-        msg.data = float(self.vehicle_heading)
-        self.heading_publisher.publish(msg)
-    # endregion
-    # -----------------------------------------------------------------------------------------------------------------
-    # endregion
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-    
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # region MISCELLANEOUS Functions
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-    def timer_callback(self):
-        if self.collision_avoidance_end_timer is True and self.collision_avoidance_timer_running is False:
-            self.current_time = datetime.now()
-            self.collision_avoidance_timer_running = True
-        if self.collision_avoidance_timer_running is True:
-            self.collision_avidance_elapsed_time = (datetime.now() - self.current_time).total_seconds()
-
-    # offboard control toward initial point
-    def takeoff_and_go_initial_position(self):
-        self.publish_position_setpoint(self.veh_trj_set)
-        if abs(self.z - self.initial_position[2]) < 0.3:
-            self.initial_position_flag = True
-
-    def state_logger(self):
-        # self.get_logger().info("-----------------")
-        # # self.get_logger().info("sim_time =" + str(self.sim_time) )
-        # self.get_logger().info("path_planning_heartbeat =" + str(self.path_planning_heartbeat) )
-        # self.get_logger().info("path_following_heartbeat =" + str(self.path_following_heartbeat) )
-        # self.get_logger().info("collision_avoidance_heartbeat =" + str(self.collision_avoidance_heartbeat) )
-        # self.get_logger().info("obstacle_flag =" + str(self.obstacle_flag) )
-        # self.get_logger().info("path_following_flag =" + str(self.path_following_flag) )
-        # self.get_logger().info("collision_avoidance_flag =" + str(self.collision_avoidance_flag) )
-        # self.get_logger().info("initial_position_flag =" + str(self.initial_position_flag) )
-        # self.get_logger().info("NED Position:   [x]=" + str(self.x) +", [e]=" + str(self.y) +", [d]=" + str(self.z))
-        # self.get_logger().info("NED Velocity:   [v_x]=" + str(self.v_x) +", [v_y]=" + str(self.v_y) +", [v_z]=" + str(self.v_z))
-        # self.get_logger().info("Body Velocity:   [u]=" + str(self.u) +", [v]=" + str(self.v) +", [w]=" + str(self.w))
-        # self.get_logger().info("Euler Angle:   [psi]=" + str(self.psi) +", [theta]=" + str(self.theta) +", [phi]=" + str(self.phi))
-        # self.get_logger().info("Angular Velocity:   [p]=" + str(self.p) +", [q]=" + str(self.q) +", [r]=" + str(self.r))
-        # self.get_logger().info("Body Velocity CMD:   [cmd_x]=" + str(self.vel_cmd_body_x) +", [cmd_y]=" + str(self.vel_cmd_body_y) +", [cmd_z]=" + str(self.vel_cmd_body_z))
-        # self.get_logger().info("min_dist =" + str(self.min_dist) )
-        # flightlog = "%f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n" %(
-        #     self.obstacle_flag, self.path_following_flag, self.collision_avoidance_flag, self.x, self.y, 
-        #     self.z, self.v_x, self.v_y, self.v_z, self.u, self.v, self.w, self.psi, 
-        #     self.theta, self.phi, self.p, self.q, self.r, 
-        #     self.vel_cmd_body_x,  self.vel_cmd_body_y,  self.vel_cmd_body_z,
-        #     self.min_dist)
-        # self.flightlogFile.write(flightlog)
-        pass
-        # self.datalogFile.close()
-
-        # endregion
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-
-
+        msg.path_planning_complete = True
+        msg.waypoint_x = self.guid_var.waypoint_x
+        msg.waypoint_y = self.guid_var.waypoint_y
+        msg.waypoint_z = self.guid_var.waypoint_z
+        self.local_waypoint_publisher_to_pf.publish(msg)
 def main(args=None):
-    print("======================================================")
-    print("------------- main() in controller.py ----------------")
-    print("======================================================")
     rclpy.init(args=args)
-    controller = Controller()
-    rclpy.spin(controller)
-    controller.destroy_node()
+    ca_pf_integration_test = CAPFIntegrationTest()
+    rclpy.spin(ca_pf_integration_test)
+    ca_pf_integration_test.destroy_node()
     rclpy.shutdown()
-    pass
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -11,8 +11,8 @@ from rclpy.node import Node
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
 from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, EtcSubscriber
-from ..lib.publisher import PX4Publisher, HeartbeatPublisher, WaypointPublisher, PlotterPublisher
-from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
+from ..lib.publisher import PX4Publisher, HeartbeatPublisher, ModulePublisher, PlotterPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncModule, PubFuncPlotter
 
 class PathFollowingTest(Node):
     def __init__(self):
@@ -32,8 +32,8 @@ class PathFollowingTest(Node):
         self.pub_px4.declareOffboardControlModePublisher()
         self.pub_px4.declareVehicleAttitudeSetpointPublisher()
 
-        self.pub_waypoint   = WaypointPublisher(self)
-        self.pub_waypoint.declareLocalWaypointPublisherToPF()
+        self.pub_module   = ModulePublisher(self)
+        self.pub_module.declareLocalWaypointPublisherToPF()
 
         self.pub_heartbeat  = HeartbeatPublisher(self)
         self.pub_heartbeat.declareControllerHeartbeatPublisher()
@@ -66,7 +66,7 @@ class PathFollowingTest(Node):
         # region PUB FUNC
         self.pub_func_heartbeat = PubFuncHeartbeat(self)
         self.pub_func_px4       = PubFuncPX4(self)
-        self.pub_func_waypoint  = PubFuncWaypoint(self)
+        self.pub_func_module  = PubFuncModule(self)
         self.pub_func_plotter   = PubFuncPlotter(self)
         # endregion
         # ----------------------------------------------------------------------------------------#
@@ -106,7 +106,7 @@ class PathFollowingTest(Node):
         if self.mode_flag.is_takeoff == True and self.mode_flag.pf_recieved_lw == False:
             self.pub_func_px4.publish_vehicle_command(self.modes.prm_position_mode)
             set_wp(self)
-            self.pub_func_waypoint.local_waypoint_publish(True)
+            self.pub_func_module.local_waypoint_publish(True)
             publish_to_plotter(self)
             
         # check if path following is recieved the local waypoint
@@ -116,6 +116,7 @@ class PathFollowingTest(Node):
             # offboard mode
             self.pub_func_px4.publish_offboard_control_mode(self.offboard_mode)
             self.pub_func_px4.publish_vehicle_command(self.modes.prm_offboard_mode)
+            self.get_logger().info('Path following is running')
         
         if self.mode_flag.pf_done == True and self.mode_flag.is_landed == False:
             self.mode_flag.is_pf = False

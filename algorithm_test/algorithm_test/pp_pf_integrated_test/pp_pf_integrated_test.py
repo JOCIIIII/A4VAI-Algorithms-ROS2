@@ -11,8 +11,8 @@ from rclpy.node import Node
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
 from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, EtcSubscriber
-from ..lib.publisher import PX4Publisher, HeartbeatPublisher, WaypointPublisher, PlotterPublisher
-from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
+from ..lib.publisher import PX4Publisher, HeartbeatPublisher, ModulePublisher, PlotterPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncModule, PubFuncPlotter
 
 from custom_msgs.msg import GlobalWaypointSetpoint, LocalWaypointSetpoint
 
@@ -46,8 +46,8 @@ class PathFollowingTest(Node):
         self.pub_px4.declareOffboardControlModePublisher()
         self.pub_px4.declareVehicleAttitudeSetpointPublisher()
 
-        self.pub_waypoint   = WaypointPublisher(self)
-        self.pub_waypoint.declareLocalWaypointPublisherToPF()
+        self.pub_module   = ModulePublisher(self)
+        self.pub_module.declareLocalWaypointPublisherToPF()
 
         self.pub_global_waypoint = self.create_publisher(GlobalWaypointSetpoint, "/global_waypoint_setpoint", 1)
         self.sub_local_waypoint = self.create_subscription(LocalWaypointSetpoint, "/local_waypoint_setpoint_from_PP", self.local_waypoint_callback, 1)
@@ -83,7 +83,7 @@ class PathFollowingTest(Node):
         # region PUB FUNC
         self.pub_func_heartbeat = PubFuncHeartbeat(self)
         self.pub_func_px4       = PubFuncPX4(self)
-        self.pub_func_waypoint  = PubFuncWaypoint(self)
+        self.pub_func_module  = PubFuncModule(self)
         self.pub_func_plotter   = PubFuncPlotter(self)
         # endregion
         # ----------------------------------------------------------------------------------------#
@@ -191,7 +191,7 @@ class PathFollowingTest(Node):
         msg.waypoint_x = self.guid_var.waypoint_x
         msg.waypoint_y = self.guid_var.waypoint_y
         msg.waypoint_z = self.guid_var.waypoint_z
-        self.local_waypoint_publisher.publish(msg)
+        self.local_waypoint_publisher_pf.publish(msg)
 
 
 def main(args=None):
