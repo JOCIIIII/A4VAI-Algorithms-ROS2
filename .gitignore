@@ -9,3 +9,5 @@ pathplanning/pathplanning/Results_Images/path_2d.png
 pathplanning/pathplanning/Results_Images/path_3d_learning.png
 pathplanning/pathplanning/Results_Images/path_3d.png
 *.pyc
+pathfollowing/pathfollowing/log.csv
+algorithm_test/algorithm_test/path_following_unit_test/log/20250410_133134_pf_unit_test.csv
