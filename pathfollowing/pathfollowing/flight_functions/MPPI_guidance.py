@@ -239,7 +239,7 @@ class MPPI_Guidance_Modules():
             // QUADROTOR MODEL PARAMETERS (PLEASE UPDATE WHEN CHANGES OCCUR)
             //--------------------------------------------------------------
             double physical_param_throttle_hover          = 0.7299;
-            double physical_param_mass                    = 1.535; 
+            double physical_param_mass                    = 1.972475; //241223 diy
             double GnC_param_desired_speed                = 3.; 
             double GnC_param_virtual_target_distance      = 4.5; 
             double GnC_param_distance_change_WP           = GnC_param_virtual_target_distance; 

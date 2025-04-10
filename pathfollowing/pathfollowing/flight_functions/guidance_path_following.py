@@ -184,7 +184,6 @@ def guidance_modules(QR_Guid_type, QR_WP_idx_passed, QR_WP_idx_heading, WP_WPs_s
 #     att_ang_cmd = np.array([phi, theta, psi])
 #     return T_cmd, norm_T_cmd, att_ang_cmd
 
-
 #.. prev_convert_Ai_cmd_to_thrust_and_att_ang_cmd
 def convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, Ai_cmd, mass, T_max, WP_WPs, WP_idx_heading, Ri, att_ang, del_psi_cmd_limit):    
     # thrust cmd
@@ -224,6 +223,47 @@ def convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, Ai_cmd, mass, T_max, WP_WPs, 
             
     att_ang_cmd = np.array([phi, theta, psi])
     return T_cmd, norm_T_cmd, att_ang_cmd
+
+# #.. convert_Ai_cmd_to_thrust_and_att_ang_cmd (yaw, pitch)
+# def convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, Ai_cmd, mass, T_max, WP_WPs, WP_idx_heading, Ri, att_ang, del_psi_cmd_limit, Ai):    
+#     # thrust cmd  - ? ??? ?? ??, Thrust_cmd ?? Ab_cmd_z ? ????? ? (????? ?? ???? ?? ??) **-??240827-**
+#     mag_Ai_cmd = np.linalg.norm(Ai_cmd)
+#     Ab_cmd     = np.matmul(cI_B, Ai_cmd)
+#     T_cmd      = min(abs(Ab_cmd[2]) * mass, T_max)
+#     norm_T_cmd  = T_cmd / T_max
+
+#     # attitude angle cmd
+#     psi_des_p  = m.atan2(Ai_cmd[1], Ai_cmd[0])
+#     psi_des_n  = psi_des_p + np.pi
+
+#     del_psi_p  = ( (psi_des_p - att_ang[2] + np.pi) % (2*np.pi) ) - np.pi
+#     del_psi_n  = ( (psi_des_n - att_ang[2] + np.pi) % (2*np.pi) ) - np.pi
+
+#     if abs( del_psi_p ) < abs( del_psi_n ):
+#         psi_des = psi_des_p
+#         del_psi = del_psi_p
+#         theta   = -m.atan2(m.sqrt(Ai_cmd[0]*Ai_cmd[0]+Ai_cmd[1]*Ai_cmd[1]), -Ai_cmd[2])
+#     else:
+#         psi_des = psi_des_n
+#         del_psi = del_psi_n
+#         theta   = m.atan2(m.sqrt(Ai_cmd[0]*Ai_cmd[0]+Ai_cmd[1]*Ai_cmd[1]), -Ai_cmd[2])
+
+#     # att_ang_cmd -  del_psi_cmd limitation
+#     psi         =   psi_des
+#     del_psi     =   psi_des - att_ang[2]
+#     if abs(del_psi) > 1.0*m.pi:
+#         if psi_des > att_ang[2]:
+#             psi_des = psi_des - 2.*m.pi
+#         else:
+#             psi_des = psi_des + 2.*m.pi
+#     del_psi     =   max(min(psi_des - att_ang[2], del_psi_cmd_limit), -del_psi_cmd_limit)
+#     psi_des     =   att_ang[2] + del_psi
+#     psi         =   psi_des
+#     theta       =   max(min(theta, 30*np.pi/180),-30*np.pi/180)
+
+#     att_ang_cmd = np.array([0.0, theta, psi])
+
+#     return T_cmd, norm_T_cmd, att_ang_cmd
 
 #.. NDO_for_Ai_cmd
 def NDO_for_Ai_cmd(T_cmd, mass, grav, QR_cI_B, QR_gain_NDO, QR_z_NDO, QR_Vi, QR_dt_GCU, Ai_rotor_drag):

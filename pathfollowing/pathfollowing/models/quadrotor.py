@@ -157,6 +157,13 @@ class Quadrotor_6DOF():
             WP_WPs, self.PF_var.WP_idx_heading, self.state_var.Ri, self.state_var.att_ang, self.GnC_param.del_psi_cmd_limit)
         pass
 
+    # #.. prev_guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd
+    # def guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd(self, WP_WPs):
+    #     self.guid_var.T_cmd, self.guid_var.norm_T_cmd, self.guid_var.att_ang_cmd = guidance_path_following.convert_Ai_cmd_to_thrust_and_att_ang_cmd(
+    #         self.state_var.cI_B, self.guid_var.Ai_cmd_compensated, self.physical_param.mass, self.physical_param.T_max, 
+    #         WP_WPs, self.PF_var.WP_idx_heading, self.state_var.Ri, self.state_var.att_ang, self.GnC_param.del_psi_cmd_limit, self.state_var.Ai)
+    #     pass
+
     #.. guid_convert_att_ang_cmd_to_qd_cmd
     def guid_convert_att_ang_cmd_to_qd_cmd(self):
         w, x, y, z = utility_funcs.Euler2Quaternion(self.guid_var.att_ang_cmd)

@@ -76,7 +76,8 @@ class Path_Following_Var():
         self.WP_idx_heading              =   1
         self.PF_done                     =   False
         self.WP_manual                   =   0
-        self.reWP_flag                   =   0 #20240914 diy
+        self.reWP_flag                   =   0 # 20240914 diy
+        self.reWP_flag2mppi              =   0 # 241223 diy
         self.stop_flag                   =   0
         self.point_closest_on_path_i     =   np.array([0., 0., 0.])
         self.dist_to_path                =   9999.

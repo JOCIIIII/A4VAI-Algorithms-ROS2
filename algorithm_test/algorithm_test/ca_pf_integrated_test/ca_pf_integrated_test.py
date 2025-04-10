@@ -7,14 +7,17 @@ import os
 # ROS libraries
 import rclpy
 from rclpy.node import Node
-from rclpy.clock import Clock
 
+# Custom libraries
 from ..lib.common_fuctions import set_initial_variables, state_logger, publish_to_plotter, set_wp
-from ..lib.publish_function import PubFuncHeartbeat, PubFuncPX4, PubFuncWaypoint, PubFuncPlotter
 from ..lib.timer import HeartbeatTimer, MainTimer, CommandPubTimer
-from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, HeartbeatSubscriber, MissionSubscriber, EtcSubscriber
-from ..lib.publisher import PX4Publisher, HeartbeatPublisher, WaypointPublisher, PlotterPublisher
+from ..lib.subscriber import PX4Subscriber, FlagSubscriber, CmdSubscriber, HeartbeatSubscriber, EtcSubscriber
+from ..lib.publisher import PX4Publisher, HeartbeatPublisher, ModulePublisher, PlotterPublisher
+from ..lib.publisher import PubFuncHeartbeat, PubFuncPX4, PubFuncModule, PubFuncPlotter
 from ..lib.data_class import *
+
+# custom message
+from custom_msgs.msg import StateFlag
 # ----------------------------------------------------------------------------------------#
 
 class CAPFIntegrationTest(Node):
@@ -30,31 +33,35 @@ class CAPFIntegrationTest(Node):
         # endregion
         # -----------------------------------------------------------------------------------------#
         # region PUBLISHERS
+        # PX4 publisher
         self.pub_px4 = PX4Publisher(self)
         self.pub_px4.declareVehicleCommandPublisher()
         self.pub_px4.declareOffboardControlModePublisher()
         self.pub_px4.declareVehicleAttitudeSetpointPublisher()
         self.pub_px4.declareTrajectorySetpointPublisher()
+        # module data publisher
+        self.pub_module = ModulePublisher(self)
+        self.pub_module.declareLocalWaypointPublisherToPF()
+        self.pub_module.declareModeFlagPublisherToCC()
 
-        self.pub_waypoint = WaypointPublisher(self)
-        self.pub_waypoint.declareLocalWaypointPublisherToPF()
-
+        self.sub_flag = self.create_subscription(StateFlag, '/mode_flag2control', self.flag_callback, 1)
+        # heartbeat publisher
         self.pub_heartbeat = HeartbeatPublisher(self)
         self.pub_heartbeat.declareControllerHeartbeatPublisher()
         self.pub_heartbeat.declarePathPlanningHeartbeatPublisher()
-
+        # plotter publisher
         self.pub_plotter = PlotterPublisher(self)
         self.pub_plotter.declareGlobalWaypointPublisherToPlotter()
         self.pub_plotter.declareLocalWaypointPublisherToPlotter()
         self.pub_plotter.declareHeadingPublisherToPlotter()
         self.pub_plotter.declareStatePublisherToPlotter()
         self.pub_plotter.declareMinDistancePublisherToPlotter()
-        # end region
+        # endregion
         # ----------------------------------------------------------------------------------------#
         # region PUB FUNC
         self.pub_func_heartbeat = PubFuncHeartbeat(self)
         self.pub_func_px4       = PubFuncPX4(self)
-        self.pub_func_waypoint  = PubFuncWaypoint(self)
+        self.pub_func_module  = PubFuncModule(self)
         self.pub_func_plotter   = PubFuncPlotter(self)
         # endregion
         # ----------------------------------------------------------------------------------------#
@@ -70,10 +77,6 @@ class CAPFIntegrationTest(Node):
         self.sub_flag = FlagSubscriber(self)
         self.sub_flag.declareConveyLocalWaypointCompleteSubscriber(self.mode_flag)
         self.sub_flag.declarePFCompleteSubscriber(self.mode_flag)
-
-        self.sub_mission = MissionSubscriber(self)
-        self.sub_mission.declareLidarSubscriber(self.state_var, self.guid_var, self.mode_flag, self.ca_var, self.pub_func_waypoint)
-        self.sub_mission.declareDepthSubscriber(self.mode_flag, self.ca_var)
 
         self.sub_etc = EtcSubscriber(self)
         self.sub_etc.declareHeadingWPIdxSubscriber(self.guid_var)
@@ -124,17 +127,20 @@ class CAPFIntegrationTest(Node):
                 set_wp(self)
 
             if self.mode_flag.is_pp_mode == True:
-                self.pub_func_waypoint.local_waypoint_publish(True)
+                self.pub_func_module.local_waypoint_publish(True)
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_position_mode)
             
-            if self.mode_flag.pf_recieved_lw == True:
+            if self.mode_flag.pf_recieved_lw == True and self.mode_flag.is_offboard == False:
                 self.mode_flag.is_pp_mode = False
                 self.mode_flag.is_offboard = True
                 self.mode_flag.is_pf = True
+                self.get_logger().info('Vehicle is in offboard mode')
 
             # check if path following is recieved the local waypoint
             if self.mode_flag.is_offboard == True and self.mode_flag.pf_done == False:
                 publish_to_plotter(self)
+                self.pub_func_module.publish_flags()
+
                 if self.mode_flag.is_pf == True:
                     self.offboard_mode.attitude = True
                     self.offboard_mode.velocity = False
@@ -152,7 +158,7 @@ class CAPFIntegrationTest(Node):
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_land_mode)
 
                 # check if the vehicle is landed
-                if np.abs(self.state_var.vz) < 0.05 and np.abs(self.state_var.z < 0.05):
+                if np.abs(self.state_var.vz_n) < 0.05 and np.abs(self.state_var.z < 0.05):
                     self.mode_flag.is_landed = True
                     self.get_logger().info('Vehicle is landed')
 
@@ -164,6 +170,34 @@ class CAPFIntegrationTest(Node):
             # self.get_logger().info(str(self.ca_var.depth_min_distance))
             state_logger(self)
     # endregion
+
+    def flag_callback(self, msg):
+        # self.get_logger().info(f"Flag received: is_pf: {msg.is_pf}, is_ca: {msg.is_ca}") 씨발 누가 쏘는거야
+        self.mode_flag.is_ca = msg.is_ca
+        self.mode_flag.is_pf = msg.is_pf
+        if self.mode_flag.is_pf == True:
+            self.get_logger().info("is_pf is True")
+            z = self.guid_var.waypoint_z[self.guid_var.cur_wp]
+            self.guid_var.waypoint_x = self.guid_var.waypoint_x[self.guid_var.cur_wp:]
+            self.guid_var.waypoint_y = self.guid_var.waypoint_y[self.guid_var.cur_wp:]
+            self.guid_var.waypoint_z = self.guid_var.waypoint_z[self.guid_var.cur_wp:]
+
+            # self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, msg.x))
+            # self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, msg.y))
+            # self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, z))
+
+            self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, self.state_var.x))
+            self.guid_var.waypoint_x = list(np.insert(self.guid_var.waypoint_x, 0, self.state_var.x))
+            self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, self.state_var.y))
+            self.guid_var.waypoint_y = list(np.insert(self.guid_var.waypoint_y, 0, self.state_var.y))
+            self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, self.state_var.z))
+            self.guid_var.waypoint_z = list(np.insert(self.guid_var.waypoint_z, 0, self.state_var.z))
+
+            self.guid_var.real_wp_x = self.guid_var.waypoint_x
+            self.guid_var.real_wp_y = self.guid_var.waypoint_y
+            self.guid_var.real_wp_z = self.guid_var.waypoint_z
+
+            self.pub_func_module.local_waypoint_publish(False)
 
 def main(args=None):
     rclpy.init(args=args)

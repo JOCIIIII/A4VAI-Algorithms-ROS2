@@ -49,10 +49,9 @@ class MPPI_Parameter():
             self.lamb2      =   self.R[0]*self.var2*self.var2
             self.lamb3      =   self.R[0]*self.var3*self.var3
             
-            self.u2_init    =   1
-            self.u3_init    =   1.
+            self.u2_init    =   0.5
+            self.u3_init    =   2
                      
-            
         elif self.MPPI_type == 2:
             # # cost-related
             # self.Q      =   np.array([0.3, 0.6 * 0.5])
@@ -216,7 +215,7 @@ class GnC_Parameter():
         self.tau_phi    =   0.6
         self.tau_the    =   self.tau_phi
         self.tau_psi    =   self.tau_phi * 2.
-        self.del_psi_cmd_limit = 10. * m.pi/180.
+        self.del_psi_cmd_limit = 30. * m.pi/180.
                 
         self.tau_Wb     =   0.05 # in [https://www.research-collection.ethz.ch/bitstream/handle/20.500.11850/154099/eth-7387-01.pdf]
 
@@ -267,7 +266,7 @@ class Physical_Parameter():
         self.Iyy            =   0.029125
         self.Izz            =   0.055225
         self.inertia        =   np.diag( [ self.Ixx,   self.Iyy,   self.Izz ] )  
-        self.mass           =   1.535
+        self.mass           =   1.535 * 1.285 # 241223 diy
         self.tau_throttle   =   0.5 * (timeConstantUp + timeConstantDown)
         # self.Lx_M           =   (d / m.sqrt(2))
         # self.Ly_M           =   (d / m.sqrt(2))

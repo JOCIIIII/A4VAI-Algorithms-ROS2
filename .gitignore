@@ -1,5 +1,6 @@
 # pycache
 __pycache__
+log
 # result images
 pathplanning/pathplanning/Results_Images/SSAC_Result_biary.png
 pathplanning/pathplanning/Results_Images/SAC_Result_og.pn

@@ -86,6 +86,7 @@ class Node_MPPI_Output(Node):
         self.QR.PF_var.WP_idx_heading  =   msg.data[0]
         self.QR.PF_var.WP_idx_passed   =   msg.data[1]
         self.QR.GnC_param.Guid_type    =   msg.data[2]
+        self.QR.PF_var.reWP_flag2mppi  =   msg.data[3]
 
         self.MPPI_input_int_Q6_received =  True
         # self.get_logger().info('subscript_MPPI_input_int_Q6 msgs: {0}'.format(msg.data))
@@ -168,6 +169,15 @@ class Node_MPPI_Output(Node):
             pass
 
         if self.MPPI_setting_complete == True:
+
+            if self.QR.PF_var.reWP_flag2mppi == 1:
+                # self.get_logger().info('PATH FOLLOWING RESTART!!!')
+                self.MG.u2  =  self.MG.MP.u2_init * np.ones(self.MG.MP.N)
+                self.MG.u3  =  self.MG.MP.u3_init * np.ones(self.MG.MP.N)
+                self.GP.GP_param.set_values(self.GP.GP_param.dt_GPR, self.GP.GP_param.ne_GPR)
+                
+                pass
+
             if self.QR.PF_var.WP_idx_passed >= 1:
                 self.GP.GPR_forecasting(self.sim_time)
 
@@ -191,9 +201,7 @@ class Node_MPPI_Output(Node):
             self.publish_MPPI_output()
         else:
             pass
-
         
-        # self.get_logger().info("subscript_MPPI_output: " + str(self.QR.guid_var.MPPI_ctrl_input[0]) +", [1]=" + str(self.QR.guid_var.MPPI_ctrl_input[1]) +", [2]=" + str(self.QR.guid_var.MPPI_ctrl_input[2]))
         pass
     
     ###.. GPR functions ..###

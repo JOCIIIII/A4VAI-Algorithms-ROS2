@@ -1,0 +1,6 @@
+[submodule "pathplanning"]
+	path = pathplanning
+	url = https://github.com/Brightestsama/A4VAI-PathPlanning.git
+[submodule "A4VAI-TestCode"]
+	path = A4VAI-TestCode
+	url = https://github.com/JOCIIIII/A4VAI-TestCode.git

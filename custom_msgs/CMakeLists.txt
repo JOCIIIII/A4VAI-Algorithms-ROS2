@@ -9,6 +9,7 @@ set(msg_files
   "msg/GlobalWaypointSetpoint.msg"
   "msg/LocalWaypointSetpoint.msg"
   "msg/ConveyLocalWaypointComplete.msg"
+  "msg/StateFlag.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

@@ -161,8 +161,8 @@ class Plotter(Node):
                 label="Local Waypoints",
                 s=6,
             )
-            for i, (x, y) in enumerate(zip(self.waypoint_x, self.waypoint_y)):
-                self.ax1.text(x, y, str(i), fontsize=9, ha='right', color='blue')
+            # for i, (x, y) in enumerate(zip(self.waypoint_x, self.waypoint_y)):
+            #     self.ax1.text(x, y, str(i), fontsize=30, ha='right', color='black')
 
             # Plot local waypoint path with red color line
             self.ax1.plot(
@@ -214,8 +214,6 @@ class Plotter(Node):
                 color="red",
                 s=6,
             )
-            for i, (x, y) in enumerate(zip(self.waypoint_x, self.waypoint_y)):
-                self.ax1.text(x, y, str(i), fontsize=9, ha='right', color='blue')
 
             self.ax2.plot(
                 self.waypoint_x,
@@ -264,7 +262,7 @@ class Plotter(Node):
             self.ax2.set_title("Vihicle Position")
             self.ax2.set_xlabel("X Coordinate")
             self.ax2.set_ylabel("Y Coordinate")
-            self.ax2.legend()
+            self.ax2.legend(loc="upper left")
             self.ax2.grid()
 
             # 텍스트를 추가할 위치 (x, y) 좌표
@@ -275,19 +273,13 @@ class Plotter(Node):
                     self.vehicle_x[-1],
                     self.vehicle_y[-1] - 7,
                     "Coliision Avoidance",
-                    fontsize=20,
+                    fontsize=40,
                     ha="center",
-                )
-                self.ax2.text(
-                    self.vehicle_x[-1],
-                    self.vehicle_y[-1] - 9,
-                    "Depth min distance    :" + str(self.min_distance),
-                    fontsize=10,
-                    ha="center",
+                    color="red",
                 )
             else:
                 self.ax2.text(
-                    self.vehicle_x[-1], self.vehicle_y[-1] - 7, "Path Following", fontsize=20, ha="center"
+                    self.vehicle_x[-1], self.vehicle_y[-1] - 7, "Path Following", fontsize=40, ha="center", color="blue"
                 )
 
             # endregion
@@ -395,8 +387,6 @@ class Plotter(Node):
                     label="Vehicle Position",
                     linewidth=4,
                 )
-            for i, (x, y) in enumerate(zip(self.waypoint_x, self.waypoint_y)):
-                self.ax1.text(x, y, str(i), fontsize=9, ha='right', color='blue')
 
                 # 드론의 위치에 따라 시점 고정
                 x_center = self.vehicle_x[-1]
@@ -439,8 +429,6 @@ class Plotter(Node):
                 label="Local Waypoints",
                 s=6,
             )
-            for i, (x, y) in enumerate(zip(self.waypoint_x, self.waypoint_y)):
-                self.ax1.text(x, y, str(i), fontsize=9, ha='right', color='blue')
 
             self.ax4.plot(
                 self.waypoint_y,

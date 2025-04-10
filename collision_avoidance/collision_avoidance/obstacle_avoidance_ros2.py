@@ -72,10 +72,11 @@ class JBNU_Collision(Node):
                 vyaw = infer[3] * 1.0
 
                 cmd = Twist()
-                cmd.linear.x = float(vx) * 2.0
-                cmd.linear.y = float(vy) * 2.0
+                cmd.linear.x = float(vx)
+                cmd.linear.y = float(vy)
                 cmd.linear.z = float(vz)
                 cmd.angular.z = vyaw * 2.0
+                # print('cmd2cnt:', cmd.angular.z)
                 self.publisher_cmd.publish(cmd)
             else :
                 pass
@@ -97,14 +98,7 @@ class JBNU_Collision(Node):
 
         valid_image[valid_mask] = image[valid_mask]
 
-        # Your preprocessing steps here
         image = np.interp(image, (0, 12.0), (0, 255))
-        self.publish_image4(image)
-        # scaled_depths = np.interp(valid_depths, (valid_depths.min(), valid_depths.max()), (0, 255))
-
-        # output_image = np.full(image.shape, 255, dtype=np.uint8)
-            
-        # output_image[valid_mask] = scaled_depths.astype(np.uint8)
 
         image = preprocess(image)
 
