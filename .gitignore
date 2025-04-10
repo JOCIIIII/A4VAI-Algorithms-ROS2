@@ -8,3 +8,4 @@ pathplanning/pathplanning/Results_Images/path_2d_learning.png
 pathplanning/pathplanning/Results_Images/path_2d.png
 pathplanning/pathplanning/Results_Images/path_3d_learning.png
 pathplanning/pathplanning/Results_Images/path_3d.png
+*.pyc
