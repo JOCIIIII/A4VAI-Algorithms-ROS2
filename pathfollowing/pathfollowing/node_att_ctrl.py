@@ -44,7 +44,7 @@ class NodeAttCtrl(Node):
         super().__init__('node_attitude_control')
 
         #.. simulation settings
-        self.guid_type_case      =   3       # | 0: Pos. Ctrl     | 1: GL-based  | 2: MPPI-direct | 3: MPPI-GL
+        self.guid_type_case      =   4       # | 0: Pos. Ctrl     | 3: MPPI-GL (original cost)    | 4: MPPI-GL (cruise speed control)
         self.wp_type_selection   =   4       # | 0: straight line | 1: rectangle | 2: circle      | 3: designed | 4: path planning solution
         
         #.. model settings
@@ -138,14 +138,14 @@ class NodeAttCtrl(Node):
         self.heartbeat_timer  =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
         self.timer            =   self.create_timer(period_offboard_att_ctrl, self.publisher_vehicle_attitude_setpoint)
 
-        # Guid_type = | 0: PD control | 1: guidance law | 2: MPPI direct accel cmd | 3: MPPI guidance-based |
+        # Guid_type = | 0: PD control | 3: MPPI guidance-based | 4: MPPI-GL (cruise speed control)
         if self.guid_type_case >= 3:
-            period_MPPI_input   =   0.5 * self.QR.MPPI_param.dt_MPPI    # 2 times faster than MPPI dt
-            self.timer  =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_int_Q6)
-            self.timer  =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_Q6)
-            self.timer  =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_VT)
-            self.timer  =   self.create_timer(period_MPPI_input * 10., self.publish_MPPI_input_dbl_WP)
-            self.timer  =   self.create_timer(period_MPPI_input, self.publish_GPR_input_dbl_NDO)
+            period_MPPI_input =   0.5 * self.QR.MPPI_param.dt_MPPI    # 2 times faster than MPPI dt
+            self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_int_Q6)
+            self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_Q6)
+            self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_VT)
+            self.timer        =   self.create_timer(period_MPPI_input * 10., self.publish_MPPI_input_dbl_WP)
+            self.timer        =   self.create_timer(period_MPPI_input, self.publish_GPR_input_dbl_NDO)
         
         self.timer  =   self.create_timer(self.QR.GnC_param.dt_GCU, self.main_attitude_control)
                      
@@ -218,7 +218,6 @@ class NodeAttCtrl(Node):
     def subscript_MPPI_output(self, msg):
         self.QR.guid_var.MPPI_ctrl_input[0] =   msg.data[0]
         self.QR.guid_var.MPPI_ctrl_input[1] =   msg.data[1]
-        self.QR.guid_var.MPPI_ctrl_input[2] =   msg.data[2]
 
         # self.get_logger().info('subscript_MPPI_output msgs: {0}'.format(msg.data))
         pass
@@ -381,7 +380,7 @@ class NodeAttCtrl(Node):
                 #.. waypoint regeneration, initialization 241223 diy
                 if (self.QR.PF_var.reWP_flag == 1):
                     self.QR.PF_var.reWP_flag      = 0    
-                    # self.WP.WPs                   = self.WP.reWPs
+                    # self.WP.WPs                 = self.WP.reWPs
                     self.QR.PF_var.WP_idx_heading = 1
                     self.QR.PF_var.WP_idx_passed  = 0
                     self.QR.guid_var.z_NDO        = np.array([0., 0., 0.])
@@ -403,15 +402,14 @@ class NodeAttCtrl(Node):
                 self.QR.guid_NDO_for_Ai_cmd()                                                # NDO for disturbance estimation
                 self.QR.guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd(self.WP.WPs)
                 self.QR.guid_convert_att_ang_cmd_to_qd_cmd()
-                
+
                 #.. guidance command
                 self.veh_att_set.thrust_body    =   [0., 0., -self.QR.guid_var.norm_T_cmd]
                 self.veh_att_set.q_d            =   self.QR.guid_var.qd_cmd
 
-                # if self.QR.PF_var.WP_idx_heading != (self.WP.WPs.shape[0] - 1):
-                    # self.get_logger().info("mppi_Ax " + str(self.QR.guid_var.MPPI_ctrl_input[1]) +", mppi_eta " + str(self.QR.guid_var.MPPI_ctrl_input[2]))
-
-                # pass
+                if self.QR.PF_var.WP_idx_heading != (self.WP.WPs.shape[0] - 1):
+                    self.get_logger().info("vel " + str(np.linalg.norm(self.est_state.vel_NED)) + "mppi_Ax " + str(self.QR.guid_var.MPPI_ctrl_input[0]) +", mppi_eta " + str(self.QR.guid_var.MPPI_ctrl_input[1]))
+                pass
             else :
                 pass
         else:

@@ -90,11 +90,7 @@ def takeoff_to_first_WP(WP_WPs, QR_Ri, QR_WP_idx_passed, dist_change_first_WP, V
 def cost_function_1(Guid_type, R, u, Q0, dist_to_path, Q1, att_ang, dt):
     # uRu of LQR cost, set low value of norm(R)
 
-    if Guid_type == 3:
-        uRu = (u[1]*u[1]*R[1] + u[2]*u[2]*R[2])
-    else:
-        uRu = (u[0]*u[0]*R[0] + u[1]*u[1]*R[1] + u[2]*u[2]*R[2])
-        pass
+    uRu = (u[0]*u[0]*R[0] + u[1]*u[1]*R[1])
     
     # path following performance
     x0 = dist_to_path

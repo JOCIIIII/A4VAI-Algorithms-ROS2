@@ -25,7 +25,7 @@ class Node_MPPI_Output(Node):
         
         #.. model settings
         Iris_Param_Physical      = quadrotor_iris_parameters.Physical_Parameter()
-        Iris_Param_GnC           = quadrotor_iris_parameters.GnC_Parameter(3)
+        Iris_Param_GnC           = quadrotor_iris_parameters.GnC_Parameter(4)
         MPPI_Param               = quadrotor_iris_parameters.MPPI_Parameter(Iris_Param_GnC.Guid_type)
         GPR_Param                = quadrotor_iris_parameters.GPR_Parameter(MPPI_Param.dt_MPPI, MPPI_Param.N)
         self.QR                  = quadrotor.Quadrotor_6DOF(Iris_Param_Physical, Iris_Param_GnC, MPPI_Param, GPR_Param)
@@ -37,7 +37,7 @@ class Node_MPPI_Output(Node):
         
         #===================================================================================================================
         #.. variable initialization
-        self.sim_time = 0.       
+        self.sim_time                   = 0.       
         self.MPPI_input_int_Q6_received = False
         self.MPPI_input_dbl_WP_received = False
         self.MPPI_setting_complete      = False
@@ -94,24 +94,24 @@ class Node_MPPI_Output(Node):
     
     #.. subscript_MPPI_input_dbl_Q6
     def subscript_MPPI_input_dbl_Q6(self, msg):
-        self.QR.state_var.Ri[0]                         =   msg.data[0]
-        self.QR.state_var.Ri[1]                         =   msg.data[1]
-        self.QR.state_var.Ri[2]                         =   msg.data[2]
-        self.QR.state_var.Vi[0]                         =   msg.data[3]
-        self.QR.state_var.Vi[1]                         =   msg.data[4]
-        self.QR.state_var.Vi[2]                         =   msg.data[5]
-        self.QR.state_var.att_ang[0]                    =   msg.data[6]
-        self.QR.state_var.att_ang[1]                    =   msg.data[7]
-        self.QR.state_var.att_ang[2]                    =   msg.data[8]
-        self.QR.guid_var.T_cmd                          =   msg.data[9]
+        self.QR.state_var.Ri[0]        =   msg.data[0]
+        self.QR.state_var.Ri[1]        =   msg.data[1]
+        self.QR.state_var.Ri[2]        =   msg.data[2]
+        self.QR.state_var.Vi[0]        =   msg.data[3]
+        self.QR.state_var.Vi[1]        =   msg.data[4]
+        self.QR.state_var.Vi[2]        =   msg.data[5]
+        self.QR.state_var.att_ang[0]   =   msg.data[6]
+        self.QR.state_var.att_ang[1]   =   msg.data[7]
+        self.QR.state_var.att_ang[2]   =   msg.data[8]
+        self.QR.guid_var.T_cmd         =   msg.data[9]
         # self.get_logger().info('subscript_MPPI_input_dbl_Q6 msgs: {0}'.format(msg.data))
         pass
             
     #.. subscript_MPPI_input_dbl_VT
     def subscript_MPPI_input_dbl_VT(self, msg):
-        self.QR.PF_var.VT_Ri[0]   =   msg.data[0]
-        self.QR.PF_var.VT_Ri[1]   =   msg.data[1]
-        self.QR.PF_var.VT_Ri[2]   =   msg.data[2]
+        self.QR.PF_var.VT_Ri[0]        =   msg.data[0]
+        self.QR.PF_var.VT_Ri[1]        =   msg.data[1]
+        self.QR.PF_var.VT_Ri[2]        =   msg.data[2]
         # self.get_logger().info('subscript_MPPI_input_dbl_VT msgs: {0}'.format(msg.data))
         pass
             
@@ -141,7 +141,7 @@ class Node_MPPI_Output(Node):
     #.. publish_MPPI_output
     def publish_MPPI_output(self):
         msg                 =   Float64MultiArray()
-        msg.data            =   [self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1], self.QR.guid_var.MPPI_ctrl_input[2]]
+        msg.data            =   [self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1]]
         
         self.MPPI_output_publisher_.publish(msg)
         # self.get_logger().info('mppi: {0}'.format(np.linalg.norm(self.M)))
@@ -172,12 +172,12 @@ class Node_MPPI_Output(Node):
 
             if self.QR.PF_var.reWP_flag2mppi == 1:
                 # self.get_logger().info('PATH FOLLOWING RESTART!!!')
-                self.MG.u2  =  self.MG.MP.u2_init * np.ones(self.MG.MP.N)
-                self.MG.u3  =  self.MG.MP.u3_init * np.ones(self.MG.MP.N)
+                self.MG.u0  =  self.MG.MP.u0_init * np.ones(self.MG.MP.N)
+                self.MG.u1  =  self.MG.MP.u1_init * np.ones(self.MG.MP.N)
                 self.GP.GP_param.set_values(self.GP.GP_param.dt_GPR, self.GP.GP_param.ne_GPR)
                 
                 pass
-
+            
             if self.QR.PF_var.WP_idx_passed >= 1:
                 self.GP.GPR_forecasting(self.sim_time)
 
@@ -192,8 +192,6 @@ class Node_MPPI_Output(Node):
                 self.MG.Ai_est_dstb[:,0] = self.QR.guid_var.out_NDO[0]*np.ones(self.MG.MP.N)
                 self.MG.Ai_est_dstb[:,1] = self.QR.guid_var.out_NDO[1]*np.ones(self.MG.MP.N)
                 self.MG.Ai_est_dstb[:,2] = self.QR.guid_var.out_NDO[2]*np.ones(self.MG.MP.N)
-
-            # self.get_logger().info("GP: "+str(self.MG.Ai_est_dstb[0,0])+", NDO: "+str(self.QR.guid_var.out_NDO[0]))
 
             #.. MPPI algorithm
             self.QR.guid_var.MPPI_ctrl_input, self.QR.guid_var.MPPI_calc_time = self.MG.run_MPPI_Guidance(self.QR, self.WP.WPs)
@@ -224,10 +222,6 @@ class Node_MPPI_Output(Node):
             # np.savetxt(self.GPRlog_Y, self.GPR.me_y_array.reshape(1, self.GPR.ne_GPR), delimiter=' ')
             # np.savetxt(self.GPRlog_Z, self.GPR.me_z_array.reshape(1, self.GPR.ne_GPR), delimiter=' ')
             pass
-    
-        
-    
-    
     
     
 def main(args=None):

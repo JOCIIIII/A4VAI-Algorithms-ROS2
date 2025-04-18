@@ -24,96 +24,41 @@ class MPPI_Parameter():
     
     #.. >>>>>  set_values  <<<<<
     def set_values(self, MPPI_type):
-        self.MPPI_type =  MPPI_type  # | 0: Ctrl-based | 1: GL-based | 2: Direct | 3: GL-based-MPPI | 4: Ctrl-based MPPI | 9: test
+        self.MPPI_type          =  MPPI_type  # | 0: Ctrl-based | 1: GL-based | 2: Direct | 3: GL-based-MPPI | 4: Ctrl-based MPPI | 9: test
         
-        # cost-related
-        W = 0.01
-        self.Q                  =   W * np.array([1.0, 1.]) * 1.
-        self.R                  =   W * np.array([0.5, 0.5, 0.5]) * 0.1     # R? MPPI input ?? ??? ??? ? ?? ?? **-??240827-**
-        self.P                  =   W * np.array([0.5]) * 0.5 * 2.0
-        self.cost_min_V_aligned =   0.3
         self.dt_MPPI            =   0.05
+        self.K                  =   256 
+        self.N                  =   70
+
+        # cost-related        
+        self.cost_min_V_aligned =   0.3    
         
-        # MPPI parameters
         if self.MPPI_type == 3:
-            self.flag_cost_calc     =   0
-            
-            #.. Parameters - low performance && short computation
-            self.dt_MPPI     =   0.05
-            self.K           =   256 
-            self.N           =   70
-            #.. u1: VTD, u2: desired_speed, u3: guid_eta
-            
-            self.var2       =   1.0 * 0.7
-            self.var3       =   1.0 * 0.7
-            self.lamb2      =   self.R[0]*self.var2*self.var2
-            self.lamb3      =   self.R[0]*self.var3*self.var3
-            
-            self.u2_init    =   0.5
-            self.u3_init    =   2
-                     
-        elif self.MPPI_type == 2:
-            # # cost-related
-            # self.Q      =   np.array([0.3, 0.6 * 0.5])
-            # self.R      =   np.array([0.001 * 0.5] )
-            # self.cost_min_V_aligned = 0.5
-            
-            self.flag_cost_calc     =   0
-            #.. Parameters - low performance && short computation
-            self.K      =   256
-            self.dt     =   0.05
-            self.N      =   70
-            self.nu     =   1000.       # 2.
-            #.. u1: VTD, u2: desired_speed, u3: guid_eta
-            self.var1   =   1.0 * 0.7
-            self.var2   =   self.var1
-            self.var3   =   self.var2
-            self.lamb1  =   self.R[0] * self.var1* self.var1
-            self.lamb2  =   self.R[0] * self.var2* self.var2
-            self.lamb3  =   self.R[0] * self.var3* self.var3
-            self.u1_init    =   0.
-            self.u2_init    =   0.
-            self.u3_init    =   0.
-            
-            
-        elif self.MPPI_type == 9:
-            self.flag_cost_calc     =   0
-            #.. Parameters - low performance && short computation
-            self.dt_MPPI     =   0.05
-            self.K      =   1
-            self.N      =   1100
-            self.nu     =   1000.       # 2.
-            #.. u1: VTD, u2: desired_speed, u3: guid_eta
-            self.var1   =   1.0 * 0.5
-            self.var2   =   self.var1
-            self.var3   =   self.var1
-            self.lamb1  =   1.0 *1.0
-            self.lamb2  =   self.lamb1
-            self.lamb3  =   self.lamb1
-            self.u1_init    =   3.
-            self.u2_init    =   2.
-            self.u3_init    =   2.
-        else:
-            self.flag_cost_calc     =   0
-            #.. Parameters - low performance && short computation
-            self.dt_MPPI     =   0.05
-            self.K      =   1
-            self.N      =   1
-            self.nu     =   1000.       # 2.
-            #.. u1: VTD, u2: desired_speed, u3: guid_eta
-            self.var1   =   1.0 * 0.5
-            self.var2   =   self.var1
-            self.var3   =   self.var1
-            self.lamb1  =   1.0 *1.0
-            self.lamb2  =   self.lamb1
-            self.lamb3  =   self.lamb1
-            self.u1_init    =   1.
-            self.u2_init    =   1.
-            self.u3_init    =   1.
-            
-        
+            W                     =   0.01
+            self.Q                =   W * np.array([1.0, 1.0, 1.0])
+            self.R                =   W * np.array([0.5, 0.5, 0.5]) * 0.1     # R? MPPI input ?? ??? ??? ? ?? ?? **-??240827-**
+            self.P                =   W * np.array([0.5, 0.5, 0.5])
+            self.var0             =   1.0 * 0.7
+            self.var1             =   1.0 * 0.7
+            self.beta             =   self.R[0]*self.var0*self.var0
+            self.gamma            =   self.beta
+            self.u0_init          =   0.5
+            self.u1_init          =   2
+
+        elif self.MPPI_type == 4:
+            W                     =   5.0
+            self.Q                =   W * np.array([1.0, 1., 1.0])
+            self.P                =   W * np.array([0.5, 0.5, 0.5])
+            self.var0             =   1.0 * 0.7
+            self.var1             =   1.0 * 0.7
+            self.beta             =   1e-1
+            self.gamma            =   1e-3
+            self.R                =   np.array([1., 1., 0.])
+            self.R[0]             =   self.beta/(self.var0*self.var0)
+            self.R[1]             =   self.beta/(self.var1*self.var1)
+            self.u0_init          =   0.0
+            self.u1_init          =   2.
         pass
-    
     pass
 
 #.. GPR Parameter
@@ -193,8 +138,9 @@ class GnC_Parameter():
         #.. PF guidance
         self.dt_GCU                    =   0.004
         self.Guid_type                 =   Guid_type       # | 0: Ctrl-based | 1: GL-based | 2: Direct | 3: GL-based-MPPI | 4: Ctrl-based MPPI | 9: test
-        self.desired_speed             =   3.
+        self.desired_speed             =   2.
         self.desired_speed_test        =   0.
+        self.cruise_speed              =   3.
         self.virtual_target_distance   =   4.5
         self.distance_change_WP        =   self.virtual_target_distance
         self.dist_change_first_WP      =   0.3
@@ -209,7 +155,7 @@ class GnC_Parameter():
         self.guid_eta   =   3.
         
         #.. NDO parameter    
-        self.gain_NDO   =   1.0 * np.array([1.0,1.0,1.0])
+        self.gain_NDO   =   2.0 * np.array([1.0,1.0,1.0])
 
         #.. attitude control parameter
         self.tau_phi    =   0.6

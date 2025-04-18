@@ -128,7 +128,7 @@ class Guid_Var():
         self.out_NDO            =   np.array([0., 0., 0.])
         self.z_NDO              =   np.array([0., 0., 0.])
         self.Ai_rotor_drag      =   np.array([0., 0., 0.])
-        self.MPPI_ctrl_input    =   np.zeros(3)
+        self.MPPI_ctrl_input    =   np.zeros(2)
         self.MPPI_calc_time     =   0.
         self.qd_cmd             =   np.array([0., 0., 0., 0.])
         pass
