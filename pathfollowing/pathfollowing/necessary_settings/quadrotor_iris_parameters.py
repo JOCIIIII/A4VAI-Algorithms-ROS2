@@ -24,7 +24,7 @@ class MPPI_Parameter():
     
     #.. >>>>>  set_values  <<<<<
     def set_values(self, MPPI_type):
-        self.MPPI_type          =  MPPI_type  # | 0: Ctrl-based | 1: GL-based | 2: Direct | 3: GL-based-MPPI | 4: Ctrl-based MPPI | 9: test
+        self.MPPI_type          =  MPPI_type  # | 0: Ctrl-based | 3: GL-based-MPPI | 4: MPPI-GL (cruise speed control)
         
         self.dt_MPPI            =   0.05
         self.K                  =   256 
