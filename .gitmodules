@@ -4,3 +4,7 @@
 [submodule "algorithm_test"]
 	path = algorithm_test
 	url = https://github.com/JOCIIIII/A4VAI-TestCode.git
+[submodule "pathfollowing"]
+	path = pathfollowing
+	url = https://github.com/dailydi2/A4VAI-PathFollowing.git
+
