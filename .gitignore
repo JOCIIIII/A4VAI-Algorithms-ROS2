@@ -7,3 +7,5 @@ common_interfaces
 
 .vscode
 
+*.cache
+

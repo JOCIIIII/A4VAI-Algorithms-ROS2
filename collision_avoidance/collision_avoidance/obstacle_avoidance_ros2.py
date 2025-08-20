@@ -69,13 +69,13 @@ class JBNU_Collision(Node):
                 vx = infer[0]
                 vy = infer[1]
                 vz = infer[2]
-                vyaw = infer[3] * 1.0
+                vyaw = infer[3] * 2.0
 
                 cmd = Twist()
                 cmd.linear.x = float(vx)
                 cmd.linear.y = float(vy)
                 cmd.linear.z = float(vz)
-                cmd.angular.z = vyaw * 2.0
+                cmd.angular.z = vyaw
                 # print('cmd2cnt:', cmd.angular.z)
                 self.publisher_cmd.publish(cmd)
             else :
@@ -97,6 +97,8 @@ class JBNU_Collision(Node):
         valid_mask = (image <= 12) & (image > 0.3)
 
         valid_image[valid_mask] = image[valid_mask]
+        # cv2.imshow('image', valid_image)
+        # cv2.waitKey(1)
 
         image = np.interp(image, (0, 12.0), (0, 255))
 
