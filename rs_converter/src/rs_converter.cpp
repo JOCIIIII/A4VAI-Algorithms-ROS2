@@ -13,13 +13,13 @@ std::string lidar_topic = "/airsim_node/SimpleFlight/lidar/points/velo";
 int N_SCAN = 16;
 int Horizon_SCAN = 1800;
 
-static int RING_ID_MAP_16[] = {
+/*static int RING_ID_MAP_16[] = {
     0, 1, 2, 3, 4, 5, 6, 7, 15, 14, 13, 12, 11, 10, 9, 8
-};
+};*/
 
 struct PointXYZIRT {
     PCL_ADD_POINT4D
-    PCL_ADD_INTENSITY;
+    PCL_ADD_INTENSITY
     uint16_t ring;
     float time;
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW

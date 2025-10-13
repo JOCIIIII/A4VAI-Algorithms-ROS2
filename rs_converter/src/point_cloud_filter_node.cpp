@@ -2,6 +2,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 
 #include <pcl_conversions/pcl_conversions.h>
@@ -32,6 +33,7 @@ public:
             "/ground_truth/state", 10, std::bind(&PointCloudFilter::odomCallback, this, std::placeholders::_1));
 
         pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/filtered/pointcloud", 10);
+        pub_rand_point_flag_ = this->create_publisher<std_msgs::msg::Bool>("/ca_rand_point_flag", 10);
         min_dist_pub_ = this->create_publisher<std_msgs::msg::Float32>("/min_distance", 10);
         closest_point_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/closest_point", 10);
 
@@ -39,6 +41,7 @@ public:
     }
 
 private:
+    bool is_rand_point = false;
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr input_cloud_msg)
     {
         // Convert ROS2 PointCloud2 to PCL PointCloud
@@ -67,7 +70,18 @@ private:
 
         condrem.filter(*filtered_cloud);
 
-        ensureMinimumPoints(filtered_cloud, 256);
+        is_rand_point = ensureMinimumPoints(filtered_cloud, 256);
+
+        if (is_rand_point) {
+            std_msgs::msg::Bool rand_point_msg;
+            rand_point_msg.data = is_rand_point;
+            pub_rand_point_flag_->publish(rand_point_msg);
+        } else {
+            std_msgs::msg::Bool rand_point_msg;
+            rand_point_msg.data = false;
+            pub_rand_point_flag_->publish(rand_point_msg);
+        };
+
         filtered_cloud->width  = static_cast<uint32_t>(filtered_cloud->points.size());
         filtered_cloud->height = 1;         
 
@@ -89,16 +103,20 @@ private:
         publishClosestPointCoordinates(closest_point);
     }
 
-    void ensureMinimumPoints(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, int min_points)
+    bool ensureMinimumPoints(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, int min_points)
     {
+        bool is_rand_point = false;
         while (cloud->points.size() < min_points)
         {
             pcl::PointXYZ point;
-            point.x = 50.0;
+            point.x = 60.0;
             point.y = std::rand() % 14 - 7.0;
             point.z = std::rand() % 8 - 4.0;
             cloud->points.push_back(point);
+            is_rand_point = true;
         }
+        std::cout << "is_rand_point: " << is_rand_point << std::endl;
+        return is_rand_point;
     }
 
     float computeMinimumDistance(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, pcl::PointXYZ &closest_point)
@@ -147,6 +165,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_rand_point_flag_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr min_dist_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr closest_point_pub_;
 

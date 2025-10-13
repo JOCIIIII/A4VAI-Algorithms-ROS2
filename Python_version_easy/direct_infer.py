@@ -9,6 +9,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from sensor_msgs_py import point_cloud2 as pc2
 
@@ -95,6 +96,12 @@ class OnnxControllerNode(Node):
             self.pointcloud_callback,
             qos_profile_sensor_data,  # best-effort sensor QoS
         )
+        self.rand_point_sub = self.create_subscription(
+            Bool,
+            "/ca_rand_point_flag",
+            self.rand_point_callback,
+            qos_profile_sensor_data,  # best-effort sensor QoS
+        )
 
 
         self.get_logger().info(
@@ -125,11 +132,22 @@ class OnnxControllerNode(Node):
         # Predict and publish Twist
         actions = self.policy.predict(input_data)
         cmd = Twist()
-        cmd.linear.x = float(actions[0])
-        cmd.linear.y = float(actions[1])
-        cmd.linear.z = float(actions[2])
-        cmd.angular.z = float(actions[3])
+        if self.rand_point_flag.data:
+            cmd.linear.x = float(actions[0]+5)
+            cmd.linear.y = float(actions[1])-0.85
+            cmd.linear.z = float(actions[2])-0.24
+            cmd.angular.z = (float(actions[3]+0.5))
+        else:
+            cmd.linear.x = float(actions[0]+5)
+            cmd.linear.y = float(actions[1])
+            cmd.linear.z = float(actions[2])
+            cmd.angular.z = -float(actions[3]*3)
+
+        with open("/home/user/workspace/ros2/logs/cmd.csv", "a") as f:
+            f.write(f"{cmd.linear.x}, {cmd.linear.y}, {cmd.linear.z}, {cmd.angular.z}\n")
         self.cmd_pub.publish(cmd)
+    def rand_point_callback(self, msg: Bool):
+        self.rand_point_flag = msg
 
 
 def main(args=None):
