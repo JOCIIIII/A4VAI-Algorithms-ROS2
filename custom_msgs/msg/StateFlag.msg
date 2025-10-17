@@ -1,7 +1,7 @@
-bool is_takeoff  
-bool is_pp
-bool is_offboard
-bool is_pf
-bool is_ca
-bool is_land
+bool disarm
+bool takeoff  
+bool offboard
+bool path_following
+bool collision_avoidance
+bool landing
 

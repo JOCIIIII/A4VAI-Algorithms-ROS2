@@ -17,7 +17,7 @@ def setInitialVariables(classIn):
     # initialize flag
     classIn.global_waypoint_set = False  # flag whether global waypoint is subscribed
     classIn.local_waypoint_set = False  # flag whether local waypoint is subscribed
-    classIn.is_ca  = False # flag whether state is subscribed
+    classIn.COLLISION_AVOIDANCE  = False # flag whether state is subscribed
 
     # initialize global waypoint
     classIn.start_global_waypoint = []  # start global waypoint

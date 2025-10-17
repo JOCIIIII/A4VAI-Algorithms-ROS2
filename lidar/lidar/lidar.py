@@ -7,8 +7,8 @@ from std_msgs.msg import Float32MultiArray
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
-from .data_class import StateVariable
-from .subscriber import PX4Subscriber
+from lidar.lib.data_class import StateVariable
+from lidar.lib.subscriber import PX4Subscriber
 
 import numpy as np
 from sklearn.cluster import DBSCAN
@@ -29,8 +29,8 @@ class LidarProcessor(Node):
         )
 
         self.sub_px4 = PX4Subscriber(self)
-        self.sub_px4.declareVehicleLocalPositionSubscriber(self.state_var)
-        self.sub_px4.declareVehicleAttitudeSubscriber(self.state_var)
+        self.sub_px4.declareVehicleLocalPositionSubscriber()
+        self.sub_px4.declareVehicleAttitudeSubscriber()
 
         # lidar qos profile
         self.qos_profile_lidar = QoSProfile(
@@ -44,6 +44,9 @@ class LidarProcessor(Node):
             self.lidar_callback,
             self.qos_profile_lidar,
         )
+        # filter lidar points publisher
+        self.filtered_lidar_publisher_ = self.create_publisher(
+            PointCloud2, "/airsim_node/SimpleFlight/lidar/points/velo", 10)
 
         # obstacle info publishers
         self.obstacle_publisher_ = self.create_publisher(
@@ -61,6 +64,9 @@ class LidarProcessor(Node):
             # preprocess points
             x, y, z = self.preprocess_points(input_points)
 
+            # publish filtered lidar points
+            self.publish_filtered_lidar(x, y, z, pc_msg)
+
             # obstacle clustering
             obstacle_info = self.cluster_obstacles(x, y, z)
 
@@ -77,14 +83,27 @@ class LidarProcessor(Node):
         y = points["y"]
         z = points["z"]
 
-        # filter out points inside the vehicle
+        # filter out points inside the vehicle and ground points
         vehicle_radius = 0.01  
-        mask = np.sqrt((x)**2 + (y)**2 + (z)**2) > vehicle_radius
+        # mask = (np.sqrt((x)**2 + (y)**2 + (z)**2) > vehicle_radius) & (z > 0.5)
+        mask = (np.sqrt((x)**2 + (y)**2 + (z)**2) > vehicle_radius)
         x = x[mask]
         y = y[mask]
         z = z[mask]
 
         return x, y, z
+
+    # publish filtered lidar points
+    def publish_filtered_lidar(self, x, y, z, point_cloud_msg):
+
+        filtered_lidar_msg = PointCloud2()
+        filtered_lidar_msg.header = point_cloud_msg.header
+        points = np.column_stack((x, y, z)).astype(np.float32)
+        filtered_lidar_msg = point_cloud2.create_cloud_xyz32(point_cloud_msg.header, points)
+        self.filtered_lidar_publisher_.publish(filtered_lidar_msg)
+
+
+        
     
 
     def cluster_obstacles(self, x, y, z):

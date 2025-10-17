@@ -115,7 +115,6 @@ private:
             cloud->points.push_back(point);
             is_rand_point = true;
         }
-        std::cout << "is_rand_point: " << is_rand_point << std::endl;
         return is_rand_point;
     }
 

@@ -133,15 +133,19 @@ class OnnxControllerNode(Node):
         actions = self.policy.predict(input_data)
         cmd = Twist()
         if self.rand_point_flag.data:
-            cmd.linear.x = float(actions[0]+5)
-            cmd.linear.y = float(actions[1])-0.85
-            cmd.linear.z = float(actions[2])-0.24
-            cmd.angular.z = (float(actions[3]+0.5))
-        else:
-            cmd.linear.x = float(actions[0]+5)
-            cmd.linear.y = float(actions[1])
+            cmd.linear.x = float(actions[0]+1)
+            cmd.linear.y = float(actions[1])-0.8
+            # cmd.linear.y = float(actions[1])-0.763
             cmd.linear.z = float(actions[2])
-            cmd.angular.z = -float(actions[3]*3)
+            # cmd.linear.z = 0.0
+            cmd.angular.z = -(float(actions[3]))
+        else:
+            cmd.linear.x = float(actions[0]+1)
+            cmd.linear.y = (float(actions[1]))
+            # cmd.linear.y = (float(actions[1])-0.763)*3.0
+            cmd.linear.z = float(actions[2])
+            # cmd.linear.z = 0.0
+            cmd.angular.z = -float(actions[3])
 
         with open("/home/user/workspace/ros2/logs/cmd.csv", "a") as f:
             f.write(f"{cmd.linear.x}, {cmd.linear.y}, {cmd.linear.z}, {cmd.angular.z}\n")

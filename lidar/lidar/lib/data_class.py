@@ -56,20 +56,20 @@ class GuidVariable:
         self.real_wp_z = []
         
 
-class ModeFlag:
+class ModeStatus:
     STANDBY = 0
     TAKEOFF = 1
     def __init__(self):
-        self.is_standby         = True       # whether standby mode is activated
-        self.is_takeoff         = False       # whether takeoff is done
-        self.is_pp_mode         = False       # whether path planning mode is activated
-        self.pf_recieved_lw     = False     # whether local waypoint made by path planning is conveyed to path following
-        self.is_offboard        = False        # whether offboard mode is activated
+        self.DISARM         = True       # whether standby mode is activated
+        self.TAKEOFF         = False       # whether takeoff is done
+        self.path_planning         = False       # whether path planning mode is activated
+        self.pf_get_local_waypoint     = False     # whether local waypoint made by path planning is conveyed to path following
+        self.OFFBOARD        = False        # whether offboard mode is activated
         self.pf_done            = False            # whether last waypoint is reached
-        self.is_landed          = False          # whether land mode is activated
+        self.LANDING          = False          # whether land mode is activated
         self.is_disarmed        = False        # whether disarmed mode is activated
-        self.is_ca              = False
-        self.is_pf              = False
+        self.COLLISION_AVOIDANCE              = False
+        self.PATH_FOLLOWING              = False
         self.foward_clear       = False
         
 class SimulationVariable:

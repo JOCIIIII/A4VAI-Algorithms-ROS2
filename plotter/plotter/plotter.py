@@ -114,7 +114,7 @@ class Plotter(Node):
         self.vehicle_z = np.append(self.vehicle_z, vehicle_z).flatten()
 
     def state_callback(self, msg):
-        self.is_ca = msg.data
+        self.COLLISION_AVOIDANCE = msg.data
 
     def current_heading_waypoint_callback(self, msg):
         if msg.data != self.current_heading_waypoint_callback_counter:
@@ -268,7 +268,7 @@ class Plotter(Node):
             # 텍스트를 추가할 위치 (x, y) 좌표
             # x_position = x_center  # x축에서의 위치 (0~1)
             # y_position = y_center + 10  # y축에서의 위치 (0~1)
-            if self.is_ca == True:
+            if self.COLLISION_AVOIDANCE == True:
                 self.ax2.text(
                     self.vehicle_x[-1],
                     self.vehicle_y[-1] - 7,

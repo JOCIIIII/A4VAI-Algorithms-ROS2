@@ -84,8 +84,8 @@ class CAPFIntegrationTest(Node):
         self.sub_cmd.declareCAVelocitySetpointSubscriber(self.veh_vel_set, self.state_var, self.ca_var)
 
         self.sub_flag = FlagSubscriber(self)
-        self.sub_flag.declareConveyLocalWaypointCompleteSubscriber(self.mode_flag)
-        self.sub_flag.declarePFCompleteSubscriber(self.mode_flag)
+        self.sub_flag.declareConveyLocalWaypointCompleteSubscriber(self.mode_status)
+        self.sub_flag.declarePFCompleteSubscriber(self.mode_status)
 
         self.sub_etc = EtcSubscriber(self)
         self.sub_etc.declareHeadingWPIdxSubscriber(self.guid_var)
@@ -101,8 +101,8 @@ class CAPFIntegrationTest(Node):
         self.timer_offboard_control.declareOffboardControlTimer(self.offboard_control_main)
 
         self.timer_cmd = CommandPubTimer(self, self.offboard_var)
-        self.timer_cmd.declareOffboardAttitudeControlTimer(self.mode_flag, self.veh_att_set, self.pub_func_px4)
-        self.timer_cmd.declareOffboardVelocityControlTimer(self.mode_flag, self.veh_vel_set, self.pub_func_px4)
+        self.timer_cmd.declareOffboardAttitudeControlTimer(self.mode_status, self.veh_att_set, self.pub_func_px4)
+        self.timer_cmd.declareOffboardVelocityControlTimer(self.mode_status, self.veh_vel_set, self.pub_func_px4)
 
         self.timer_heartbeat = HeartbeatTimer(self, self.offboard_var, self.pub_func_heartbeat)
         self.timer_heartbeat.declareControllerHeartbeatTimer()
@@ -113,7 +113,7 @@ class CAPFIntegrationTest(Node):
         # self.get_logger().info(str(self.guid_var.waypoint_x))
         if self.offboard_var.ca_heartbeat == True and self.offboard_var.pf_heartbeat == True and self.offboard_var.pp_heartbeat == True:
             
-            if self.offboard_var.counter == self.offboard_var.flight_start_time and self.mode_flag.is_takeoff == False:
+            if self.offboard_var.counter == self.offboard_var.flight_start_time and self.mode_status.TAKEOFF == False:
                 # arm cmd to px4
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_arm_mode)
                 # offboard mode cmd to px4
@@ -124,63 +124,63 @@ class CAPFIntegrationTest(Node):
                 self.offboard_var.counter += 1
 
             # check if the vehicle is ready to initial position
-            if self.mode_flag.is_takeoff == False and self.state_var.z > self.guid_var.init_pos[2]:
-                self.mode_flag.is_takeoff = True
-                self.mode_flag.is_pp_mode = True
+            if self.mode_status.TAKEOFF == False and self.state_var.z > self.guid_var.init_pos[2]:
+                self.mode_status.TAKEOFF = True
+                self.flags.path_planning = True
                 self.get_logger().info('Vehicle is reached to initial position')
 
             # if the vehicle was taken off send local waypoint to path following and wait in position mode
-            if self.mode_flag.is_takeoff == True and self.mode_flag.pf_recieved_lw == False:
+            if self.mode_status.TAKEOFF == True and self.flags.pf_get_local_waypoint == False:
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_position_mode)
                 self.global_waypoint_publish(self.start_point, self.goal_point)
 
-            if self.mode_flag.pf_recieved_lw == True and self.mode_flag.is_offboard == False:
-                self.mode_flag.is_pp_mode = False
-                self.mode_flag.is_offboard = True
-                self.mode_flag.is_pf = True
+            if self.flags.pf_get_local_waypoint == True and self.mode_status.OFFBOARD == False:
+                self.flags.path_planning = False
+                self.mode_status.OFFBOARD = True
+                self.mode_status.PATH_FOLLOWING = True
                 self.get_logger().info('Vehicle is in offboard mode')
 
             # check if path following is recieved the local waypoint
-            if self.mode_flag.is_offboard == True and self.mode_flag.pf_done == False:
+            if self.mode_status.OFFBOARD == True and self.flags.pf_done == False:
                 publish_to_plotter(self)
                 self.pub_func_module.publish_flags()
 
-                if self.mode_flag.is_pf == True:
+                if self.mode_status.PATH_FOLLOWING == True:
                     self.offboard_mode.attitude = True
                     self.offboard_mode.velocity = False
                 
-                if self.mode_flag.is_ca == True:
+                if self.mode_status.COLLISION_AVOIDANCE == True:
                     self.offboard_mode.attitude = False
                     self.offboard_mode.velocity = True
 
                 self.pub_func_px4.publish_offboard_control_mode(self.offboard_mode)
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_offboard_mode)
                 
-            if self.mode_flag.pf_done == True and self.mode_flag.is_landed == False:
-                self.mode_flag.is_offboard = False
-                self.mode_flag.is_pf = False
+            if self.flags.pf_done == True and self.mode_status.LANDING == False:
+                self.mode_status.OFFBOARD = False
+                self.mode_status.PATH_FOLLOWING = False
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_land_mode)
 
                 # check if the vehicle is landed
                 if np.abs(self.state_var.vz_n) < 0.05 and np.abs(self.state_var.z < 0.05):
-                    self.mode_flag.is_landed = True
+                    self.mode_status.LANDING = True
                     self.get_logger().info('Vehicle is landed')
 
             # if the vehicle is landed, disarm the vehicle
-            if self.mode_flag.is_landed == True and self.mode_flag.is_disarmed == False:
+            if self.mode_status.LANDING == True and self.mode_status.is_disarmed == False:
                 self.pub_func_px4.publish_vehicle_command(self.modes.prm_disarm_mode)    
-                self.mode_flag.is_disarmed = True
+                self.mode_status.is_disarmed = True
                 self.get_logger().info('Vehicle is disarmed')  
             # self.get_logger().info(str(self.ca_var.depth_min_distance))
             state_logger(self)
     # endregion
 
     def flag_callback(self, msg):
-        # self.get_logger().info(f"Flag received: is_pf: {msg.is_pf}, is_ca: {msg.is_ca}") 씨발 누가 쏘는거야
-        self.mode_flag.is_ca = msg.is_ca
-        self.mode_flag.is_pf = msg.is_pf
-        if self.mode_flag.is_pf == True:
-            self.get_logger().info("is_pf is True")
+        # self.get_logger().info(f"Flag received: PATH_FOLLOWING: {msg.PATH_FOLLOWING}, COLLISION_AVOIDANCE: {msg.COLLISION_AVOIDANCE}") 씨발 누가 쏘는거야
+        self.mode_status.COLLISION_AVOIDANCE = msg.COLLISION_AVOIDANCE
+        self.mode_status.PATH_FOLLOWING = msg.PATH_FOLLOWING
+        if self.mode_status.PATH_FOLLOWING == True:
+            self.get_logger().info("PATH_FOLLOWING is True")
             z = self.guid_var.waypoint_z[self.guid_var.cur_wp]
             self.guid_var.waypoint_x = self.guid_var.waypoint_x[self.guid_var.cur_wp:]
             self.guid_var.waypoint_y = self.guid_var.waypoint_y[self.guid_var.cur_wp:]
@@ -209,7 +209,7 @@ class CAPFIntegrationTest(Node):
         self.pub_global_waypoint.publish(msg)
 
     def local_waypoint_callback(self, msg):
-        if self.mode_flag.pf_recieved_lw == False:
+        if self.flags.pf_get_local_waypoint == False:
 
             xy = np.array([msg.waypoint_x, msg.waypoint_y]) # [2 X N]
             
@@ -231,7 +231,7 @@ class CAPFIntegrationTest(Node):
             self.guid_var.real_wp_z = self.guid_var.waypoint_z
 
             self.local_waypoint_publish()
-            self.mode_flag.pf_recieved_lw = True
+            self.flags.pf_get_local_waypoint = True
 
         self.get_logger().info('Local waypoint recieved from path planning')
     def local_waypoint_publish(self):

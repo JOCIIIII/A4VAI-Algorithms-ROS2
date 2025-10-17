@@ -35,8 +35,8 @@ def state_logger(self):
         self.guid_var.cur_wp,
         # self.guid_var.waypoint_y,
         # self.guid_var.waypoint_z,
-        self.mode_flag.is_pf,
-        self.mode_flag.is_ca,
+        self.mode_status.PATH_FOLLOWING,
+        self.mode_status.COLLISION_AVOIDANCE,
     
     )
     self.sim_var.flight_log.write(flightlog)
@@ -46,7 +46,7 @@ def set_initial_variables(classIn, dir, sim_name):
     classIn.state_var      = StateVariable()
     classIn.offboard_var   = OffboardVariable()
     classIn.guid_var       = GuidVariable()
-    classIn.mode_flag      = ModeFlag()
+    classIn.mode_flag      = ModeStatus()
     classIn.offboard_mode  = OffboardControlModeState()
     classIn.modes          = VehicleModes()
     classIn.veh_att_set    = VehicleAttitudeSetpointState()
@@ -97,7 +97,7 @@ def publish_to_plotter(self):
     self.pub_func_plotter.publish_local_waypoint_to_plotter(self.guid_var)
     self.pub_func_plotter.publish_obstacle_min_distance(self.ca_var)
     self.pub_func_plotter.publish_heading(self.state_var)
-    self.pub_func_plotter.publish_control_mode(self.mode_flag)
+    self.pub_func_plotter.publish_control_mode(self.mode_status)
 
 def set_waypoint():
     waypoint = pd.read_csv("waypoint.csv")

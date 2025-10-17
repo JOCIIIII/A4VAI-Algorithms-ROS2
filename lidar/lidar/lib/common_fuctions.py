@@ -11,7 +11,7 @@ from .data_class import *
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from rclpy.clock import Clock
-
+from px4_msgs.msg import FusionWeight
 # endregion
 # ----------------------------------------------------------------------------------------#
 
@@ -24,9 +24,9 @@ def state_logger(self):
         self.state_var.y,
         self.state_var.z,
         # ned velocity [m/s]
-        self.state_var.vx,
-        self.state_var.vy,
-        self.state_var.vz,
+        self.state_var.vx_b,
+        self.state_var.vy_b,
+        self.state_var.vz_b,
         # attitude [rad]
         self.state_var.roll,
         self.state_var.pitch,
@@ -35,18 +35,19 @@ def state_logger(self):
         self.guid_var.cur_wp,
         # self.guid_var.waypoint_y,
         # self.guid_var.waypoint_z,
-        self.mode_flag.is_pf,
-        self.mode_flag.is_ca,
+        self.mode_status.PATH_FOLLOWING,
+        self.mode_status.COLLISION_AVOIDANCE,
     
     )
-    self.sim_var.flight_log.write(flightlog)
+    # self.sim_var.flight_log.write(flightlog)
 
 def set_initial_variables(classIn, dir, sim_name):
     
     classIn.state_var      = StateVariable()
     classIn.offboard_var   = OffboardVariable()
     classIn.guid_var       = GuidVariable()
-    classIn.mode_flag      = ModeFlag()
+    classIn.mode_status      = ModeStatus()
+    classIn.flags          = Flags()
     classIn.offboard_mode  = OffboardControlModeState()
     classIn.modes          = VehicleModes()
     classIn.veh_att_set    = VehicleAttitudeSetpointState()
@@ -66,7 +67,7 @@ def set_initial_variables(classIn, dir, sim_name):
         depth=10
     )
 
-    
+    classIn.weight = FusionWeight()
     set_logging_file(classIn)
 
 def set_wp(self):
@@ -90,14 +91,14 @@ def set_logging_file(self):
     current_time = datetime.now() + timedelta(hours=9)
     log_file_name = current_time.strftime("%Y%m%d_%H%M%S_") + self.sim_var.sim_name + ".csv"
     log_path = os.path.join((self.sim_var.dir + '/log'), log_file_name)
-    self.sim_var.flight_log = open(log_path, "w")
+    # self.sim_var.flight_log = open(log_path, "w")
 
 def publish_to_plotter(self):
     self.pub_func_plotter.publish_global_waypoint_to_plotter(self.guid_var)
     self.pub_func_plotter.publish_local_waypoint_to_plotter(self.guid_var)
     self.pub_func_plotter.publish_obstacle_min_distance(self.ca_var)
     self.pub_func_plotter.publish_heading(self.state_var)
-    self.pub_func_plotter.publish_control_mode(self.mode_flag)
+    self.pub_func_plotter.publish_control_mode(self.mode_status)
 
 def set_waypoint():
     waypoint = pd.read_csv("waypoint.csv")
@@ -123,20 +124,18 @@ def convert_quaternion2euler(w, x, y, z):
 
 # convert Body frame to NED frame
 def BodytoNED(vel_body_cmd, dcm):
-    vel_ned_cmd = np.array((dcm @ vel_body_cmd).tolist())
+    vel_ned_cmd = (dcm @ vel_body_cmd).tolist()
     return vel_ned_cmd
 
 # convert NED frame to Body frame
-def NEDtoBody(self):
-    vel_body = np.array([self.v_x, self.v_y, self.v_z])
-
-    self.u, self.v, self.w = np.array((self.DCM_nb @ vel_body).tolist())
+def NEDtoBody(vel_ned, dcm):
+    vel_body = (dcm @ vel_ned).tolist()
+    return vel_body
 
 
 # calculate DCM matrix
 #.. get DCM from Euler angle
 def DCM_from_euler_angle( EulerAng ):
-
     # Local Variable 
     spsi            =   math.sin( EulerAng[2] )
     cpsi            =   math.cos( EulerAng[2] )

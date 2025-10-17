@@ -72,16 +72,16 @@ class CmdSubscriber(object):
         self.node = node
 
     # declare path following attitude setpoint subscriber
-    def declarePFAttitudeSetpointSubscriber(self, veh_att_set):
+    def declarePFAttitudeSetpointSubscriber(self):
         self.node.PF_attitude_setpoint_subscriber = self.node.create_subscription(
             VehicleAttitudeSetpoint,
             "/pf_att_2_control",
-            lambda msg: PF_Att2Control_callback(veh_att_set, msg),
+            lambda msg: PF_Att2Control_callback(self.node.veh_att_set, msg),
             1,
         )
     
     # declare collision avoidance velocity setpoint subscriber
-    def declareCAVelocitySetpointSubscriber(self, veh_vel_set, stateVar, ca_var):
+    def declareCAVelocitySetpointSubscriber(self):
         self.node.CA_velocity_setpoint_subscriber = self.node.create_subscription(
             Twist,
             "/ca_vel_2_control",
@@ -204,11 +204,11 @@ def heading_wp_idx_callback(guid_var, msg):
 
 # update path following complete flag
 def pf_complete_callback(mode_flag, msg):
-    mode_flag.pf_done = msg.data
+    flags.pf_done = msg.data
 
 # update convey local waypoint complete flag
 def convey_local_waypoint_complete_call_back(mode_flag, msg):
-    mode_flag.pf_recieved_lw = msg.convey_local_waypoint_is_complete
+    flags.pf_get_local_waypoint = msg.convey_local_waypoint_is_complete
 
 # update controller heartbeat
 def controller_heartbeat_callback(offboard_var, msg):

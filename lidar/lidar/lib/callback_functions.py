@@ -57,7 +57,7 @@ def heading_wp_idx_callback(guid_var, msg):
     guid_var.cur_wp = msg.data
 
 def depth_callback(mode_flag, ca_var, msg):
-    if mode_flag.is_offboard:
+    if mode_flag.OFFBOARD:
         try:
             # Convert the ROS Image message to OpenCV format
             image = ca_var.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
@@ -75,11 +75,11 @@ def depth_callback(mode_flag, ca_var, msg):
         ca_var.depth_min_distance = valid_image.min()
         
         if ca_var.depth_min_distance < 10.0 and mode_flag.non_ca == False:
-            mode_flag.is_pf  = False
-            mode_flag.is_ca  = True
+            mode_flag.PATH_FOLLOWING  = False
+            mode_flag.COLLISION_AVOIDANCE  = True
 
 def lidar_callback(state_var, guid_var, mode_flag, ca_var, pub_func, pc_msg):
-    if mode_flag.is_offboard:
+    if mode_flag.OFFBOARD:
         if pc_msg.is_dense:
 
             input_points = list(point_cloud2.read_points(
@@ -113,7 +113,7 @@ def lidar_callback(state_var, guid_var, mode_flag, ca_var, pub_func, pc_msg):
                 ca_var.lidar_min_distance = 50
                 ca_var.lidar_counter = 0
 
-            if mode_flag.is_ca == True:
+            if mode_flag.COLLISION_AVOIDANCE == True:
                 if ca_var.lidar_min_distance > 7:
 
                     guid_var.waypoint_x = guid_var.waypoint_x[guid_var.cur_wp:]
@@ -136,14 +136,14 @@ def lidar_callback(state_var, guid_var, mode_flag, ca_var, pub_func, pc_msg):
 
                     pub_func.local_waypoint_publish(False)
 
-                    mode_flag.is_ca = False
-                    mode_flag.is_pf = True
+                    mode_flag.COLLISION_AVOIDANCE = False
+                    mode_flag.PATH_FOLLOWING = True
 
 def pf_complete_callback(mode_flag, msg):
-    mode_flag.pf_done = msg.data
+    flags.pf_done = msg.data
 
 def convey_local_waypoint_complete_call_back(mode_flag, msg):
-    mode_flag.pf_recieved_lw = msg.convey_local_waypoint_is_complete
+    flags.pf_get_local_waypoint = msg.convey_local_waypoint_is_complete
 
 def controller_heartbeat_callback(offboard_var, msg):
     offboard_var.ct_heartbeat = msg.data

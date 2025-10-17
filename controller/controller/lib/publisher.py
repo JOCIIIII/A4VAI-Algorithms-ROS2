@@ -73,7 +73,7 @@ class ModulePublisher:
     
     # declare mode flag publisher to collision checker
     def declareModeFlagPublisherToCC(self):
-        self.node.mode_flag_publisher_to_cc = self.node.create_publisher(
+        self.node.mode_status_publisher_to_cc = self.node.create_publisher(
             StateFlag,
             '/mode_flag_to_CC',
             1
@@ -195,7 +195,7 @@ class PubFuncPX4:
 
     # publish attitude offboard command
     def publish_vehicle_attitude_setpoint(self, mode_flag, veh_att_set):
-        if mode_flag.is_pf:
+        if mode_flag.PATH_FOLLOWING:
             msg = VehicleAttitudeSetpoint()
             msg.timestamp = int(Clock().now().nanoseconds / 1000)  # time in microseconds
             msg.roll_body           = veh_att_set.roll_body
@@ -213,7 +213,7 @@ class PubFuncPX4:
 
     # publish vehicle velocity setpoint
     def publish_vehicle_velocity_setpoint(self, mode_flag, veh_vel_set):
-        if mode_flag.is_ca == True or mode_flag.is_manual == True:
+        if mode_flag.COLLISION_AVOIDANCE == True or mode_flag.is_manual == True:
             msg = TrajectorySetpoint()
             msg.timestamp = int(Clock().now().nanoseconds / 1000)  # time in microseconds
             msg.position        = veh_vel_set.position
@@ -229,7 +229,7 @@ class PubFuncModule:
     def __init__(self, node):
         self.node = node
         self.guid_var = node.guid_var
-        self.mode_flag = node.mode_flag
+        self.mode_status = node.mode_status
     # publish local waypoint
     def local_waypoint_publish(self, flag):
         msg = LocalWaypointSetpoint()
@@ -248,10 +248,10 @@ class PubFuncModule:
 
     def publish_flags(self):
         msg = StateFlag()
-        msg.is_pf = self.mode_flag.is_pf
-        msg.is_ca = self.mode_flag.is_ca
-        msg.is_offboard = self.mode_flag.is_offboard
-        self.node.mode_flag_publisher_to_cc.publish(msg)
+        msg.PATH_FOLLOWING = self.mode_status.PATH_FOLLOWING
+        msg.COLLISION_AVOIDANCE = self.mode_status.COLLISION_AVOIDANCE
+        msg.OFFBOARD = self.mode_status.OFFBOARD
+        self.node.mode_status_publisher_to_cc.publish(msg)
 
 # heartbeat publish functions
 class PubFuncHeartbeat:
@@ -296,7 +296,7 @@ class PubFuncPlotter:
     # publish control mode
     def publish_control_mode(self, mode_flag):
         msg = Bool()
-        if mode_flag.is_ca == True:
+        if mode_flag.COLLISION_AVOIDANCE == True:
             msg.data = True
         else:
             msg.data = False
