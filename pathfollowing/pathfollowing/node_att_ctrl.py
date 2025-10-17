@@ -34,8 +34,8 @@ from custom_msgs.msg import ConveyLocalWaypointComplete      # pub.
 #.. private libs.
 from .necessary_settings import waypoint, quadrotor_iris_parameters
 from .models import quadrotor
-from .flight_functions.utility_funcs import DCM_from_euler_angle, Quaternion2Euler
-
+from .flight_functions.utility_funcs import Quaternion2Euler
+from .log.logger import logger
 #===================================================================================================================
  
 class NodeAttCtrl(Node):
@@ -45,7 +45,8 @@ class NodeAttCtrl(Node):
 
         #.. simulation settings
         self.guid_type_case      =   4       # | 0: Pos. Ctrl     | 3: MPPI-GL (original cost)    | 4: MPPI-GL (cruise speed control)
-        self.wp_type_selection   =   4       # | 0: straight line | 1: rectangle | 2: circle      | 3: designed | 4: path planning solution
+        self.wp_type_selection   =   8       # | 0: path planning solution | 1: straight line | 2: rectangle | 3: zigzag  | 4: circle  
+                                             # | 5: figure-8  | 6: Alt change  | 7: Spiral  | 8: Lissajous curve (figure 8)
         
         #.. model settings
         Iris_Param_Physical      = quadrotor_iris_parameters.Physical_Parameter()
@@ -55,35 +56,39 @@ class NodeAttCtrl(Node):
         self.QR                  = quadrotor.Quadrotor_6DOF(Iris_Param_Physical, Iris_Param_GnC, MPPI_Param, GPR_Param)
         self.WP                  = waypoint.Waypoint(self.wp_type_selection)
 
-        #===================================================================================================================
-        #.. variable - vehicle attitude setpoint
+        
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # region variable - vehicle attitude setpoint
         class var_msg_veh_att_set:
             def __init__(self):
-                self.roll_body  =   np.NaN      # body angle in NED frame (can be NaN for FW)
-                self.pitch_body =   np.NaN      # body angle in NED frame (can be NaN for FW)
-                self.yaw_body   =   np.NaN      # body angle in NED frame (can be NaN for FW)
-                self.q_d        =   [np.NaN, np.NaN, np.NaN, np.NaN]
+                self.roll_body          =   np.NaN      # body angle in NED frame (can be NaN for FW)
+                self.pitch_body         =   np.NaN      # body angle in NED frame (can be NaN for FW)
+                self.yaw_body           =   np.NaN      # body angle in NED frame (can be NaN for FW)
+                self.q_d                =   [np.NaN, np.NaN, np.NaN, np.NaN]
                 self.yaw_sp_move_rate   =   np.NaN      # rad/s (commanded by user)
                 
                 # For clarification: For multicopters thrust_body[0] and thrust[1] are usually 0 and thrust[2] is the negative throttle demand.
                 # For fixed wings thrust_x is the throttle demand and thrust_y, thrust_z will usually be zero.
-                self.thrust_body    =   np.NaN * np.ones(3) # Normalized thrust command in body NED frame [-1,1]
+                self.thrust_body        =   np.NaN * np.ones(3) # Normalized thrust command in body NED frame [-1,1]
+                self.MPPI_cal_time      =   np.NaN
                 
         self.veh_att_set    =   var_msg_veh_att_set()
         
         #.. variable - estimator_state
         class var_msg_est_state:
             def __init__(self):
-                self.pos_NED        =   np.zeros(3)
-                self.vel_NED        =   np.zeros(3)
-                self.eul_ang_rad    =   np.zeros(3)
-                self.accel_xyz      =   np.zeros(3)
+                self.pos_NED            =   np.zeros(3)
+                self.vel_NED            =   np.zeros(3)
+                self.eul_ang_rad        =   np.zeros(3)
+                self.accel_xyz          =   np.zeros(3)
                 
-        self.est_state = var_msg_est_state()
+        self.est_state      =   var_msg_est_state()
 
         #.. time variables
         self.first_time_flag                = False
-        self.takeoff_time                   = 0.
         self.sim_time                       = 0.
         
         #.. status signal of another module node
@@ -96,13 +101,18 @@ class NodeAttCtrl(Node):
         self.path_planning_heartbeat        = False
         self.collision_avoidance_heartbeat  = False
 
-        #===================================================================================================================
-        ###.. Subscribers ..###
+        self.wp_complete                    = False
+
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # region Subscribers
 
         # declare heartbeat_subscriber 
-        self.controller_heartbeat_subscriber            =   self.create_subscription(Bool, '/controller_heartbeat',            self.controller_heartbeat_call_back,            10)
+        self.controller_heartbeat_subscriber            =   self.create_subscription(Bool, '/controller_heartbeat',            self.controller_heartbeat_call_back,           10)
         self.path_planning_heartbeat_subscriber         =   self.create_subscription(Bool, '/path_planning_heartbeat',         self.path_planning_heartbeat_call_back,        10)
-        self.collision_avoidance_heartbeat_subscriber   =   self.create_subscription(Bool, '/collision_avoidance_heartbeat',   self.collision_avoidance_heartbeat_call_back,   10)
+        self.collision_avoidance_heartbeat_subscriber   =   self.create_subscription(Bool, '/collision_avoidance_heartbeat',   self.collision_avoidance_heartbeat_call_back,  10)
 
         #.. subscriptions - from px4 msgs to ROS2 msgs
         self.local_waypoint_subscriber                  =   self.create_subscription(LocalWaypointSetpoint, '/local_waypoint_setpoint_to_PF',self.local_waypoint_setpoint_call_back, 1) 
@@ -111,48 +121,67 @@ class NodeAttCtrl(Node):
         self.vehicle_acceleration_subscription          =   self.create_subscription(VehicleAcceleration, '/fmu/out/vehicle_acceleration', self.subscript_vehicle_acceleration, qos_profile_sensor_data)      
 
         if self.guid_type_case >= 3:
-            self.MPPI_output_subscription   =   self.create_subscription(Float64MultiArray, 'MPPI/out/dbl_MPPI', self.subscript_MPPI_output, qos_profile_sensor_data)
+            self.MPPI_output_subscription               =   self.create_subscription(Float64MultiArray, 'MPPI/out/dbl_MPPI', self.subscript_MPPI_output, qos_profile_sensor_data)
 
-        #===================================================================================================================
-        ###.. Publishers ..###
+        if not self.wp_complete:
+            self.MPPI_output_subscription               =   self.create_subscription(Bool, '/plot_wp_complete', self.plot_wp_callback,   10)
+
+
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # region Publishers
 
         self.vehicle_attitude_setpoint_publisher        =   self.create_publisher(VehicleAttitudeSetpoint,   '/pf_att_2_control', 10)
         self.local_waypoint_receive_complete_publisher  =   self.create_publisher(ConveyLocalWaypointComplete, '/convey_local_waypoint_complete', 10) 
         self.heading_wp_idx_publisher                   =   self.create_publisher(Int32, '/heading_waypoint_index', 1)
         self.heartbeat_publisher                        =   self.create_publisher(Bool, '/path_following_heartbeat', 10)
         self.pf_complete_publisher                      =   self.create_publisher(Bool, '/path_following_complete', 1)
+        self.pf_waypoint_publisher                      =   self.create_publisher(Float64MultiArray, '/path_following_waypoint_to_plotter', 1)
+        # self.pf_to_plotter_publisher                    =   self.create_publisher(Float64MultiArray, '/path_following_to_plotter', 10)
+        
 
         if self.guid_type_case >= 3:
             #.. publishers - from ROS2 msgs to ROS2 msgs
             self.MPPI_input_int_Q6_publisher_   =   self.create_publisher(Int32MultiArray,   'MPPI/in/int_Q6', 10)
             self.MPPI_input_dbl_Q6_publisher_   =   self.create_publisher(Float64MultiArray, 'MPPI/in/dbl_Q6', 10)
-            self.MPPI_input_dbl_VT_publisher_   =   self.create_publisher(Float64MultiArray, 'MPPI/in/dbl_VT', 10)
             self.MPPI_input_dbl_WP_publisher_   =   self.create_publisher(Float64MultiArray, 'MPPI/in/dbl_WP', 10)
             self.GPR_input_dbl_NDO_publisher_   =   self.create_publisher(Float64MultiArray, 'GPR/in/dbl_Q6', 10)
                
-        #===================================================================================================================
-        ###.. Timers ..###
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # region Timers
+
         period_heartbeat_mode       =   1        
         period_offboard_att_ctrl    =   self.QR.GnC_param.dt_GCU       # required 250Hz at least for attitude control in [6]
 
-        self.heartbeat_timer  =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
-        self.timer            =   self.create_timer(period_offboard_att_ctrl, self.publisher_vehicle_attitude_setpoint)
+        self.heartbeat_timer    =   self.create_timer(period_heartbeat_mode, self.publish_heartbeat)
+        self.timer              =   self.create_timer(period_offboard_att_ctrl, self.publisher_vehicle_attitude_setpoint)
 
         # Guid_type = | 0: PD control | 3: MPPI guidance-based | 4: MPPI-GL (cruise speed control)
         if self.guid_type_case >= 3:
             period_MPPI_input =   0.5 * self.QR.MPPI_param.dt_MPPI    # 2 times faster than MPPI dt
             self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_int_Q6)
             self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_Q6)
-            self.timer        =   self.create_timer(period_MPPI_input, self.publish_MPPI_input_dbl_VT)
             self.timer        =   self.create_timer(period_MPPI_input * 10., self.publish_MPPI_input_dbl_WP)
             self.timer        =   self.create_timer(period_MPPI_input, self.publish_GPR_input_dbl_NDO)
         
         self.timer  =   self.create_timer(self.QR.GnC_param.dt_GCU, self.main_attitude_control)
-                     
-    #===================================================================================================================
-    # Subscriber Call Back Functions  
-    #===================================================================================================================
-    
+
+        if not self.wp_complete:
+            self.timer  =   self.create_timer(5, self.pf_waypoint_publish)
+            
+        # self.timer  =   self.create_timer(0.1, self.pf_publish)
+
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Subscriber Call Back Functions  
+
     # heartbeat subscribe from controller
     def controller_heartbeat_call_back(self,msg):
         self.controller_heartbeat = msg.data
@@ -182,7 +211,7 @@ class NodeAttCtrl(Node):
         elif msg.path_planning_complete == False:
             self.QR.PF_var.reWP_flag      = 1
             # 241223 diy
-            self.QR.PF_var.reWP_flag2mppi = 1
+            self.QR.PF_var.reset_flag2mppi = 1
 
             self.WP.set_values(self.wp_type_selection, msg.waypoint_x, msg.waypoint_y, msg.waypoint_z)
             # print("                                          ")
@@ -218,6 +247,7 @@ class NodeAttCtrl(Node):
     def subscript_MPPI_output(self, msg):
         self.QR.guid_var.MPPI_ctrl_input[0] =   msg.data[0]
         self.QR.guid_var.MPPI_ctrl_input[1] =   msg.data[1]
+        self.veh_att_set.MPPI_cal_time      =   msg.data[2]
 
         # self.get_logger().info('subscript_MPPI_output msgs: {0}'.format(msg.data))
         pass
@@ -230,27 +260,33 @@ class NodeAttCtrl(Node):
         else :
             self.sim_time =   msg.timestamp * 0.000001 - self.first_time
 
-    #===================================================================================================================
-    # Publication Functions   
-    #===================================================================================================================
+    def plot_wp_callback(self, msg):
+        self.wp_complete = msg.data
+
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Publication Functions   
+ 
     # publish to controller
     #.. publisher_vehicle_attitude_setpoint 
     def publisher_vehicle_attitude_setpoint(self):
-        msg                 =   VehicleAttitudeSetpoint()
-        msg.roll_body       =   self.veh_att_set.roll_body
-        msg.pitch_body      =   self.veh_att_set.pitch_body
-        msg.yaw_body        =   self.veh_att_set.yaw_body
+        msg                     =   VehicleAttitudeSetpoint()
+        msg.roll_body           =   self.veh_att_set.roll_body
+        msg.pitch_body          =   self.veh_att_set.pitch_body
+        msg.yaw_body            =   self.veh_att_set.yaw_body
         msg.yaw_sp_move_rate    =   self.veh_att_set.yaw_sp_move_rate
-        msg.q_d[0]          =   self.veh_att_set.q_d[0]
-        msg.q_d[1]          =   self.veh_att_set.q_d[1]
-        msg.q_d[2]          =   self.veh_att_set.q_d[2]
-        msg.q_d[3]          =   self.veh_att_set.q_d[3]
-        msg.thrust_body[0]  =   0.
-        msg.thrust_body[1]  =   0.
-        msg.thrust_body[2]  =   self.veh_att_set.thrust_body[2]
-        self.vehicle_attitude_setpoint_publisher.publish(msg)
-        
+        msg.q_d[0]              =   self.veh_att_set.q_d[0]
+        msg.q_d[1]              =   self.veh_att_set.q_d[1]
+        msg.q_d[2]              =   self.veh_att_set.q_d[2]
+        msg.q_d[3]              =   self.veh_att_set.q_d[3]
+        msg.thrust_body[0]      =   0.
+        msg.thrust_body[1]      =   0.
+        msg.thrust_body[2]      =   self.veh_att_set.thrust_body[2]
+        self.vehicle_attitude_setpoint_publisher.publish(msg)        
         pass
+
 
     # send local waypoint receive complete flag
     def local_waypoint_receive_complete_publish(self):
@@ -258,12 +294,37 @@ class NodeAttCtrl(Node):
         msg.convey_local_waypoint_is_complete = True
         self.local_waypoint_receive_complete_publisher.publish(msg)
 
+    def pf_waypoint_publish(self):
+        msg             =  Float64MultiArray()
+        msg.data        =  self.WP.WPs.flatten().tolist()
+        msg.data.append(self.QR.guid_var.guid_type_used)
+
+        self.pf_waypoint_publisher.publish(msg)
+        
+
+    # def pf_publish(self):
+    #     msg             =  Float64MultiArray()
+    #     euler_d         =  Quaternion2Euler(self.veh_att_set.q_d[0], self.veh_att_set.q_d[1], self.veh_att_set.q_d[2], self.veh_att_set.q_d[3])
+        
+    #     ct_error        =  self.QR.PF_var.dist_to_path
+        
+    #     vel_cmd         =  self.QR.GnC_param.desired_speed
+
+    #     msg.data = [euler_d[0], euler_d[1], euler_d[2],
+    #                  self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1], 
+    #                  float(self.QR.guid_var.guid_type_used), 
+    #                  self.QR.PF_var.VT_Ri[0],s self.QR.PF_var.VT_Ri[1], self.QR.PF_var.VT_Ri[2],
+    #                  self.veh_att_set.MPPI_cal_time,
+    #                  ct_error, vel_cmd,
+    #                  self.QR.PF_var.point_closest_on_path_i[0],self.QR.PF_var.point_closest_on_path_i[1],self.QR.PF_var.point_closest_on_path_i[2]]]
+    #     self.pf_to_plotter_publisher.publish(msg)
+    #     self.get_logger().info(f"Publish - msg.data: {msg.data}")
+
     def heading_wp_idx_publish(self):
         msg = Int32()
         msg.data = self.QR.PF_var.WP_idx_heading
         # self.get_logger().info('heading_wp_index: {0}'.format(self.QR.PF_var.WP_idx_heading))
         # self.get_logger().info('heading_wp_position: {0}'.format(self.WP.WPs[self.QR.PF_var.WP_idx_heading]))
-        # self.get_logger().info('heading_wp_position: {0}'.format(self.WP.WPs))
         self.heading_wp_idx_publisher.publish(msg)
         
     # heartbeat publish
@@ -281,10 +342,10 @@ class NodeAttCtrl(Node):
     #.. publish_MPPI_input_int_Q6
     def publish_MPPI_input_int_Q6(self):
         msg         =   Int32MultiArray()
-        msg.data    =   [self.QR.PF_var.WP_idx_heading, self.QR.PF_var.WP_idx_passed, self.QR.GnC_param.Guid_type, self.QR.PF_var.reWP_flag2mppi]
+        msg.data    =   [self.QR.PF_var.WP_idx_heading, self.QR.PF_var.WP_idx_passed, self.QR.GnC_param.Guid_type, self.QR.PF_var.reset_flag2mppi]
         self.MPPI_input_int_Q6_publisher_.publish(msg)
         # self.get_logger().info('pub msgs: {0}'.format(msg.data))
-        self.QR.PF_var.reWP_flag2mppi = 0
+        self.QR.PF_var.reset_flag2mppi = 0
         pass
     
     #.. publish_MPPI_input_dbl_Q6
@@ -297,14 +358,6 @@ class NodeAttCtrl(Node):
                          self.QR.guid_var.T_cmd]
 
         self.MPPI_input_dbl_Q6_publisher_.publish(msg)
-        # self.get_logger().info('pub msgs: {0}'.format(msg.data))
-        pass
-    
-    #.. publish_MPPI_input_dbl_VT
-    def publish_MPPI_input_dbl_VT(self):
-        msg         =   Float64MultiArray()
-        msg.data    =   [self.QR.PF_var.VT_Ri[0], self.QR.PF_var.VT_Ri[1], self.QR.PF_var.VT_Ri[2]]
-        self.MPPI_input_dbl_VT_publisher_.publish(msg)
         # self.get_logger().info('pub msgs: {0}'.format(msg.data))
         pass
     
@@ -330,10 +383,12 @@ class NodeAttCtrl(Node):
         # print(self.WP.WPs)
         pass
 
-    #===================================================================================================================
-    # Functions
-    #===================================================================================================================
-    #.. main_attitude_control 
+        # endregion
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        # region Functions
+        #.. main_attitude_control 
     def main_attitude_control(self):
         if self.controller_heartbeat == True and self.path_planning_heartbeat ==True and self.collision_avoidance_heartbeat == True:
         
@@ -350,12 +405,12 @@ class NodeAttCtrl(Node):
                 # state variable initialization
                 self.QR.update_states(self.est_state.pos_NED, self.est_state.vel_NED, self.est_state.eul_ang_rad, self.est_state.accel_xyz)
                 
-                 # waypoint settings                     
+                # waypoint settings                     
                 self.WP.set_values(self.wp_type_selection, self.WP.waypoint_x, self.WP.waypoint_y, self.WP.waypoint_z)
 
                 # self.WP.insert_WP(0, self.QR.state_var.Ri)
                 # var for waypoint regeneration test
-                self.count_stop = 0
+                self.count_t = 0
 
                 ### ---  End  - need configuration of simulation setting --- ###
 
@@ -367,14 +422,22 @@ class NodeAttCtrl(Node):
 
                 # For test------------------------------------------                
                 # 20240914 diy
-                # self.count_stop = self.count_stop + 1
-                # print(self.count_stop)
-                # if (self.count_stop>15000 and self.count_stop<18000):
-                #     self.QR.PF_var.stop_flag = 1
+                self.count_t = self.count_t + 1
 
-                # if (self.count_stop == 18000):
-                #     self.QR.PF_var.reWP_flag      = 1
-                #     self.QR.PF_var.stop_flag      = 0
+                ## stop                
+                # if (self.count_t>5000 and self.count_t<8000):
+                #     self.QR.PF_var.stop_flag = 1
+                #     self.QR.PF_var.intr_flag = 1
+                # else:
+                #     self.QR.PF_var.stop_flag = 0
+                #     self.QR.PF_var.intr_flag = 0
+
+                # interrupt
+                if (self.count_t>3000 and self.count_t<8000):
+                    self.QR.PF_var.intr_flag = 1
+                else:
+                    self.QR.PF_var.intr_flag = 0
+
                 # ---------------------------------------------------
 
                 #.. waypoint regeneration, initialization 241223 diy
@@ -385,13 +448,14 @@ class NodeAttCtrl(Node):
                     self.QR.PF_var.WP_idx_passed  = 0
                     self.QR.guid_var.z_NDO        = np.array([0., 0., 0.])
 
-                # self.get_logger().info('self.QR.PF_var.WP_idx_passed: {0}'.format(self.QR.PF_var.WP_idx_passed))
+                # self.get_logger().info('self.QR.PF_var.WP_idx_passed: {0}'.format(self.QR.PF_var.intr_flag))
                 # self.get_logger().info('heading_wp_z : {0}'.format(-self.WP.WPs[self.QR.PF_var.WP_idx_heading][2]))
+                
                 #.. state variables updates (from px4)
                 self.QR.update_states(self.est_state.pos_NED, self.est_state.vel_NED, self.est_state.eul_ang_rad, self.est_state.accel_xyz)
                 
                 #.. path following required information
-                self.QR.PF_required_info(self.WP.WPs, self.sim_time, self.QR.GnC_param.dt_GCU)
+                self.QR.PF_required_info(self.WP.WPs, self.QR.GnC_param.dt_GCU)
                 self.heading_wp_idx_publish()
                 if self.QR.PF_var.PF_done == True:
                     self.publish_pf_complete()
@@ -403,20 +467,33 @@ class NodeAttCtrl(Node):
                 self.QR.guid_convert_Ai_cmd_to_thrust_and_att_ang_cmd(self.WP.WPs)
                 self.QR.guid_convert_att_ang_cmd_to_qd_cmd()
 
+                # self.get_logger().info('guid_type: {0}'.format(self.QR.guid_var.guid_type_used))
+
                 #.. guidance command
                 self.veh_att_set.thrust_body    =   [0., 0., -self.QR.guid_var.norm_T_cmd]
                 self.veh_att_set.q_d            =   self.QR.guid_var.qd_cmd
+                # self.veh_att_set.euler      =   Quaternion2Euler(self.veh_att_set.q_d[0], self.veh_att_set.q_d[1], self.veh_att_set.q_d[2], self.veh_att_set.q_d[3])
 
-                if self.QR.PF_var.WP_idx_heading != (self.WP.WPs.shape[0] - 1):
-                    self.get_logger().info("vel " + str(np.linalg.norm(self.est_state.vel_NED)) + "mppi_Ax " + str(self.QR.guid_var.MPPI_ctrl_input[0]) +", mppi_eta " + str(self.QR.guid_var.MPPI_ctrl_input[1]))
-                pass
-            else :
-                pass
+            #     if self.QR.PF_var.WP_idx_heading != (self.WP.WPs.shape[0] - 1):
+            #         self.get_logger().info("vel " + str(np.linalg.norm(self.est_state.vel_NED)) + "mppi_Ax " + str(self.QR.guid_var.MPPI_ctrl_input[0]) +", mppi_eta " + str(self.QR.guid_var.MPPI_ctrl_input[1]))
+            #     pass
+            # else :
+            #     pass
+
+            vel_tot = np.linalg.norm(self.est_state.vel_NED)
+            vel_err = self.QR.GnC_param.desired_speed - vel_tot
+            logger.update(self.sim_time, self.est_state.pos_NED, self.est_state.vel_NED, self.est_state.eul_ang_rad,
+                          self.QR.guid_var.MPPI_ctrl_input[0:2], 
+                          self.veh_att_set.MPPI_cal_time,
+                          self.QR.PF_var.dist_to_path, vel_err)
+
         else:
             pass
-    
 
-        
+
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region MAIN CODE
 def main(args=None):
     print("======================================================")
     print("------------- main() in node_att_ctrl.py -------------")
@@ -429,5 +506,6 @@ def main(args=None):
     pass
 if __name__ == '__main__':
     main()
-
+# endregion
+                # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 

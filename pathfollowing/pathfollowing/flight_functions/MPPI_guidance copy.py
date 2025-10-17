@@ -3,7 +3,7 @@
 #   - Name : MPPI_guidance.py
 #
 #                   -   Created by E. T. Jeong, 2024.04.12
-#                   -  Modified by D. Yoon,     2025.07.28    
+#                       Keep - E. T. ver
 #
 ############################################################
 
@@ -36,7 +36,6 @@ class MPPI_Guidance_Modules():
         self.u1             =   self.MP.u1_init * np.ones(self.MP.N)
         self.Ai_est_dstb    =   np.zeros((self.MP.N,3))
         self.Ai_est_var     =   np.zeros((self.MP.N,1))
-        self.eta            =   1.
         pass
     
     def run_MPPI_Guidance(self, QR:Quadrotor_6DOF, WPs:Waypoint):
@@ -47,98 +46,111 @@ class MPPI_Guidance_Modules():
         # set CPU variables
         arr_u0          =   np.array(self.u0).astype(np.float64)
         arr_u1          =   np.array(self.u1).astype(np.float64)
-        
         arr_delta_u0    =   self.MP.var0*np.random.randn(self.MP.N,self.MP.K).astype(np.float64)
         arr_delta_u1    =   self.MP.var1*np.random.randn(self.MP.N,self.MP.K).astype(np.float64)
-                
+        arr_stk         =   np.zeros(self.MP.K).astype(np.float64)
+        
         arr_int_MP      =   np.array([self.MP.K, self.MP.N]).astype(np.int32)
         arr_dbl_MP      =   np.array([self.MP.dt_MPPI, self.MP.R[0], self.MP.R[1], self.MP.R[2], self.MP.Q[0], self.MP.Q[1], self.MP.Q[2], self.MP.P[0], self.MP.P[1], self.MP.P[2],
-                                      QR.GnC_param.virtual_target_distance, self.MP.cost_min_V_aligned, self.MP.gamma]).astype(np.float64)
+                                      QR.GnC_param.virtual_target_distance, self.MP.cost_min_V_aligned, self.MP.gamma, self.MP.beta]).astype(np.float64)
         arr_int_QR      =   np.array([QR.PF_var.WP_idx_heading, QR.PF_var.WP_idx_passed, QR.GnC_param.Guid_type]).astype(np.int32)
         arr_dbl_QR      =   np.array([QR.state_var.Ri[0], QR.state_var.Ri[1], QR.state_var.Ri[2], 
                                       QR.state_var.Vi[0], QR.state_var.Vi[1], QR.state_var.Vi[2],
                                       QR.state_var.att_ang[0], QR.state_var.att_ang[1], QR.state_var.att_ang[2], 
                                       QR.guid_var.T_cmd, QR.GnC_param.desired_speed]).astype(np.float64)
         arr_dbl_WPs         =   np.ravel(WPs,order='C').astype(np.float64)
+        arr_dbl_VT          =   np.array([QR.PF_var.VT_Ri[0], QR.PF_var.VT_Ri[1], QR.PF_var.VT_Ri[2]]).astype(np.float64)
         arr_Ai_est_dstb     =   np.array(self.Ai_est_dstb).astype(np.float64)
         arr_Ai_est_var      =   np.array(self.Ai_est_var).astype(np.float64)
-
-        arr_stk             =   np.zeros(self.MP.K).astype(np.float64)
-        arr_tmp             =   np.array([0.0, 0.0, 0.0, 0.0]).astype(np.float64)
+        arr_numer0          =   np.zeros((self.MP.N, self.MP.K)).astype(np.float64)
+        arr_numer1          =   np.zeros((self.MP.N, self.MP.K)).astype(np.float64)
+        arr_denom0          =   np.zeros((self.MP.N, self.MP.K)).astype(np.float64)
+        arr_denom1          =   np.zeros((self.MP.N, self.MP.K)).astype(np.float64)
 
         # occupy GPU memory space
         gpu_u0              =   cuda.mem_alloc(arr_u0.nbytes)
         gpu_u1              =   cuda.mem_alloc(arr_u1.nbytes)
         gpu_delta_u0        =   cuda.mem_alloc(arr_delta_u0.nbytes)
         gpu_delta_u1        =   cuda.mem_alloc(arr_delta_u1.nbytes)
+        gpu_stk             =   cuda.mem_alloc(arr_stk.nbytes)
         gpu_int_MP          =   cuda.mem_alloc(arr_int_MP.nbytes)
         gpu_dbl_MP          =   cuda.mem_alloc(arr_dbl_MP.nbytes)
         gpu_int_QR          =   cuda.mem_alloc(arr_int_QR.nbytes)
         gpu_dbl_QR          =   cuda.mem_alloc(arr_dbl_QR.nbytes)
         gpu_dbl_WPs         =   cuda.mem_alloc(arr_dbl_WPs.nbytes)
+        gpu_dbl_VT          =   cuda.mem_alloc(arr_dbl_VT.nbytes)
         gpu_Ai_est_dstb     =   cuda.mem_alloc(arr_Ai_est_dstb.nbytes)
         gpu_Ai_est_var      =   cuda.mem_alloc(arr_Ai_est_var.nbytes)
-        gpu_stk             =   cuda.mem_alloc(arr_stk.nbytes)
-        gpu_tmp             =   cuda.mem_alloc(arr_tmp.nbytes)
+        gpu_numer0          =   cuda.mem_alloc(arr_numer0.nbytes)
+        gpu_numer1          =   cuda.mem_alloc(arr_numer1.nbytes)
+        gpu_denom0          =   cuda.mem_alloc(arr_denom0.nbytes)
+        gpu_denom1          =   cuda.mem_alloc(arr_denom1.nbytes)
 
         # convert data memory from CPU to GPU
         cuda.memcpy_htod(gpu_u0,arr_u0)
         cuda.memcpy_htod(gpu_u1,arr_u1)
         cuda.memcpy_htod(gpu_delta_u0,arr_delta_u0)
         cuda.memcpy_htod(gpu_delta_u1,arr_delta_u1)
+        cuda.memcpy_htod(gpu_stk,arr_stk)
         cuda.memcpy_htod(gpu_int_MP,arr_int_MP)
         cuda.memcpy_htod(gpu_dbl_MP,arr_dbl_MP)
         cuda.memcpy_htod(gpu_int_QR,arr_int_QR)
         cuda.memcpy_htod(gpu_dbl_QR,arr_dbl_QR)
         cuda.memcpy_htod(gpu_dbl_WPs,arr_dbl_WPs)
+        cuda.memcpy_htod(gpu_dbl_VT,arr_dbl_VT)
         cuda.memcpy_htod(gpu_Ai_est_dstb,arr_Ai_est_dstb)
         cuda.memcpy_htod(gpu_Ai_est_var,arr_Ai_est_var)
-        cuda.memcpy_htod(gpu_stk,arr_stk)
-        cuda.memcpy_htod(gpu_tmp,arr_tmp)
+        cuda.memcpy_htod(gpu_numer0, arr_numer0)
+        cuda.memcpy_htod(gpu_numer1, arr_numer1)
+        cuda.memcpy_htod(gpu_denom0, arr_denom0)
+        cuda.memcpy_htod(gpu_denom1, arr_denom1)
 
         # cuda.memcpy_htod(gpu_out_results, arr_out_results)
         #.. run MPPI Monte Carlo simulation code script
         # run cuda script by using GPU cores
         unit_gpu_allocation = 32        # GPU SP number
+        # unit_gpu_allocation = 64        # GPU SP number
         blocksz     =   (unit_gpu_allocation, 1, 1)
         gridsz      =   (round(self.MP.K/(unit_gpu_allocation)), 1)
+        # gridsz      =   (round(int(np.ceil(256 / unit_gpu_allocation))), 1)
+        # blocksz     =   (1, 1, 1)
+        # gridsz      =   (1, 1)
         
-        # cuda code script function handler
         t1 = time.time()
-        self.func_MC(gpu_u0, gpu_u1, gpu_delta_u0, gpu_delta_u1, gpu_stk,
-                gpu_int_MP, gpu_dbl_MP, gpu_int_QR, gpu_dbl_QR, gpu_dbl_WPs, gpu_Ai_est_dstb, gpu_Ai_est_var, gpu_tmp,
+        self.func_MC(gpu_u0, gpu_u1, 
+                gpu_delta_u0, gpu_delta_u1, gpu_stk,
+                gpu_int_MP, gpu_dbl_MP, gpu_int_QR, gpu_dbl_QR, 
+                gpu_dbl_WPs, gpu_dbl_VT,gpu_Ai_est_dstb, gpu_Ai_est_var,
+                gpu_numer0,gpu_numer1,gpu_denom0,gpu_denom1,
                 block=blocksz, grid=gridsz)
         t2 = time.time()
 
         #.. variable setting - MPPI entropy calculation
         # entropy calc. results
-        res_stk        =   np.empty_like(arr_stk)
-        res_delta_u0   =   np.empty_like(arr_delta_u0)
-        res_delta_u1   =   np.empty_like(arr_delta_u1)
-        res_tmp        =   np.empty_like(arr_tmp)
-
-        cuda.memcpy_dtoh(res_stk, gpu_stk)
-        cuda.memcpy_dtoh(res_delta_u0, gpu_delta_u0)
-        cuda.memcpy_dtoh(res_delta_u1, gpu_delta_u1)
-        cuda.memcpy_dtoh(res_tmp, gpu_tmp)
+        res_numer0     =   np.empty_like(arr_numer0)
+        res_numer1     =   np.empty_like(arr_numer1)
+        res_denom0     =   np.empty_like(arr_denom0)
+        res_denom1     =   np.empty_like(arr_denom1)
+        cuda.memcpy_dtoh(res_numer0, gpu_numer0)
+        cuda.memcpy_dtoh(res_numer1, gpu_numer1)
+        cuda.memcpy_dtoh(res_denom0, gpu_denom0)
+        cuda.memcpy_dtoh(res_denom1, gpu_denom1)
        
         #.. MPPI input calculation
-        min_stk         =   min(res_stk)
-        res_stk         =   (res_stk - min_stk)
-        res_exp_stk     =   np.exp(-1.0/self.MP.beta*res_stk)
-        eta             =   max(np.sum(res_exp_stk), self.MP.K * 0.1)
+        # entropy
+        sum_numer0      =   res_numer0.sum(axis=1)
+        sum_numer1      =   res_numer1.sum(axis=1)
+        sum_denom0      =   res_denom0.sum(axis=1)
+        sum_denom1      =   res_denom1.sum(axis=1)
+        denom_min       =   np.zeros(np.size(sum_denom0)) + 1.0e-200
+        entropy0    =   sum_numer0/np.maximum(sum_denom0, denom_min)
+        entropy1    =   sum_numer1/np.maximum(sum_denom1, denom_min)
 
-        cost_weight0    =   (res_exp_stk*res_delta_u0).sum(axis=1)
-        cost_weight1    =   (res_exp_stk*res_delta_u1).sum(axis=1)
-
-        entropy0        =   cost_weight0 / eta
-        entropy1        =   cost_weight1 / eta
+        print("sum_numer0 " + str(sum_numer0) +", sum_denom0 " + str(sum_denom0))
 
         # MPPI input
         self.u0     =   self.u0 + entropy0
         self.u1     =   self.u1 + entropy1
-        self.eta    =   eta
-        
 
         # MPPI result and update
         MPPI_ctrl_input    =   np.array([self.u0[0], self.u1[0]])
@@ -150,9 +162,9 @@ class MPPI_Guidance_Modules():
 
         t3 = time.time()      
         # MPPI_calc_time = (t2 - t1) 
-        MPPI_calc_time = t3 - t0 # (eta/self.MP.K*100)
-        
-        return MPPI_ctrl_input, MPPI_calc_time #np.linalg.norm(QR.state_var.Vi)
+        MPPI_calc_time = t3 - t0
+
+        return MPPI_ctrl_input, MPPI_calc_time
     
     def set_total_MPPI_code(self, num_WPs):
         self.total_MPPI_code = "#define nWP " + str(num_WPs) +  """
@@ -160,7 +172,6 @@ class MPPI_Guidance_Modules():
         // utility functions
         __device__ double norm_(double x[3]);
         __device__ double dot_(double x[3], double y[3]);
-        __device__ double sign_(double x);
         __device__ void cross_(double x[3], double y[3], double res[3]);
         __device__ void azim_elev_from_vec3(double vec[3], double* azim, double* elev);
         __device__ void DCM_from_euler_angle(double ang_euler321[3], double DCM[3][3]);
@@ -175,10 +186,12 @@ class MPPI_Guidance_Modules():
         __device__ void path_following_required_info__VTP_decision(double dist_to_path, \
             double QR_virtual_target_distance, double QR_point_closest_on_path_i[3], int QR_WP_idx_passed,
             double WP_WPs[nWP][3], double PF_var_VT_Ri[3]);
+        __device__ void path_following_required_info__takeoff_to_first_WP(double WP_WPs[nWP][3], \
+            double QR_Ri[3], int QR_WP_idx_passed, double QR_dist_change_first_WP, double PF_var_VT_Ri[3]);
         __device__ void path_following_required_info__cost_function_1(double R[3], double FPA_azim_diy, double MPPI_ctrl_input[2], \
             double Q0, double dist_to_path, double Q1, double att_ang[3], double weight_by_var, \
             double unit_W1W2[3], double min_V_aligned, double cost_arr[3], double dt);
-        __device__ void path_following_required_info__cost_function_diy(double R[3], double err_azim, double MPPI_ctrl_input[2], \
+        __device__ void path_following_required_info__cost_function_diy(double R[3], double FPA_azim_diy, double MPPI_ctrl_input[2], \
             double Q[3], double dist_to_path, double cost_arr[3], double dt, double delta_u[2], double magV, \
             double refV, double MP_gamma, double att_ang[3], double weight_by_var);
         __device__ void path_following_required_info__terminal_cost_1(double P1, double WP_WPs[nWP][3], \
@@ -190,7 +203,7 @@ class MPPI_Guidance_Modules():
         __device__ void guidance_path_following__guidance_modules(int QR_Guid_type, \
             int QR_WP_idx_passed, int QR_WP_idx_heading, int WP_WPs_shape0, double VT_Ri[3], \
             double QR_Ri[3], double QR_Vi[3], double QR_Ai[3], double QR_virtual_target_distance, double QR_desired_speed, double QR_Kp_vel, double QR_Kd_vel, \
-            double QR_Kp_speed, double QR_Kd_speed, double QR_guid_eta, double MPPI_ctrl_input[2], double Aqi_cmd[3], double* lambda);
+            double QR_Kp_speed, double QR_Kd_speed, double QR_guid_eta, double MPPI_ctrl_input[2], double Aqi_cmd[3]);
         __device__ void guidance_path_following__simple_rotor_drag_model(double QR_Vi[3], \
             double psuedo_rotor_drag_coeff, double cB_I[3][3], double Fi_drag[3]);
         __device__ void guidance_path_following__convert_Ai_cmd_to_thrust_and_att_ang_cmd(double cI_B[3][3], double Ai_cmd[3], \
@@ -212,7 +225,9 @@ class MPPI_Guidance_Modules():
         __global__ void MPPI_monte_carlo_sim(double* arr_u0, double* arr_u1, \
             double* arr_delta_u0, double* arr_delta_u1, double* arr_stk, \
             int* arr_int_MP, double* arr_dbl_MP, int* arr_int_QR, double* arr_dbl_QR, \
-            double* arr_dbl_WPs, double* arr_Ai_est_dstb, double* arr_Ai_est_var, double* arr_tmp)
+            double* arr_dbl_WPs, double* arr_dbl_VT, double* arr_Ai_est_dstb, double* arr_Ai_est_var, \
+            double* arr_numer0, double* arr_numer1, \
+            double* arr_denom0, double* arr_denom1)
         {
             //.. GPU core index for parallel computation
             int idx     =   threadIdx.x + threadIdx.y*blockDim.x + blockIdx.x*blockDim.x*blockDim.y + blockIdx.y*blockDim.x*blockDim.y*gridDim.x;
@@ -220,23 +235,26 @@ class MPPI_Guidance_Modules():
             //--------------------------------------------------------------
             // QUADROTOR MODEL PARAMETERS (PLEASE UPDATE WHEN CHANGES OCCUR)
             //--------------------------------------------------------------
-            double physical_param_throttle_hover          = 0.8274;   //0.7299;
-            double physical_param_mass                    = 2.0262; //1.972475; //241223 diy
+            double physical_param_throttle_hover          = 0.7299;
+            double physical_param_mass                    = 1.972475; //241223 diy
+            double GnC_param_virtual_target_distance      = 4.5; 
+            double GnC_param_distance_change_WP           = GnC_param_virtual_target_distance; 
+            double GnC_param_dist_change_first_WP         = 0.3; 
             double GnC_param_Kp_vel                       = 1.; 
             double GnC_param_Kd_vel                       = 0.; 
             double GnC_param_Kp_speed                     = 1.; 
             double GnC_param_Kd_speed                     = 0.; 
             double GnC_param_guid_eta                     = 3.; 
-            double GnC_param_tau_phi                      = 0.3; 
-            double GnC_param_tau_the                      = 0.3; 
-            double GnC_param_tau_psi                      = 0.6; 
-            double GnC_param_tau_p                        = 0.1; 
-            double GnC_param_tau_q                        = 0.1; 
-            double GnC_param_tau_r                        = 0.2; 
+            double GnC_param_tau_phi                      = 0.6; 
+            double GnC_param_tau_the                      = 0.6; 
+            double GnC_param_tau_psi                      = 0.9; 
+            double GnC_param_tau_p                        = 0.2; 
+            double GnC_param_tau_q                        = 0.2; 
+            double GnC_param_tau_r                        = 0.3; 
             double GnC_param_alpha_p                      = 0.1; 
             double GnC_param_alpha_q                      = 0.1; 
             double GnC_param_alpha_r                      = 0.1; 
-            double physical_param_psuedo_rotor_drag_coeff = 0.6371;  //0.5620; 
+            double physical_param_psuedo_rotor_drag_coeff = 0.5620; 
             double GnC_param_del_psi_cmd_limit            = 0.349065850398866;
             double GnC_param_tau_Wb                       = 0.05;
             //--------------------------------------------------------------
@@ -249,11 +267,10 @@ class MPPI_Guidance_Modules():
             double MP_R[3]                = {arr_dbl_MP[1], arr_dbl_MP[2], arr_dbl_MP[3]}; 
             double MP_Q[3]                = {arr_dbl_MP[4], arr_dbl_MP[5], arr_dbl_MP[6]};
             double MP_P[3]                = {arr_dbl_MP[7], arr_dbl_MP[8], arr_dbl_MP[9]};
-            
-            double GnC_param_virtual_target_distance = arr_dbl_MP[10];
-            
+            double virtual_target_distance= arr_dbl_MP[10];
             double MP_cost_min_V_aligned  = arr_dbl_MP[11];
             double MP_gamma               = arr_dbl_MP[12];
+            double MP_beta                = arr_dbl_MP[13];
             
             double times_N                = 1.0;
             double modif_dt               = MP_dt / times_N;
@@ -329,41 +346,81 @@ class MPPI_Guidance_Modules():
             double delta_u[2]  = {0., };
             double FPA_azim_diy= 0.; 
             double FPA_elev_diy= 0.; 
-            double MPPI_ctrl_input[2] = {0.,};
-            double lambda      = 0.;
 
             //.. main loop
             int i_N = 0;
             for(i_N = 0; i_N < MP_N; i_N++){
-
-                //-------------------------------------------------------------------------------------------------------
-                //.. Disturbance - checked
+                    
+                //.. MPPI modules - checked
+                double MPPI_ctrl_input[2] = {0.,};
+                if(GnC_param_Guid_type >= 2){
+                    MPPI_ctrl_input[0] = arr_u0[i_N] + arr_delta_u0[idx + MP_K*i_N];
+                    MPPI_ctrl_input[1] = arr_u1[i_N] + arr_delta_u1[idx + MP_K*i_N];
+                    delta_u[0]         = arr_delta_u0[idx + MP_K*i_N];
+                    delta_u[1]         = arr_delta_u1[idx + MP_K*i_N];
+                }
                 
+                if (PF_var_WP_idx_heading == nWP-1){
+                    GnC_param_Guid_type               = 1;
+                    GnC_param_virtual_target_distance = 4;
+                    GnC_param_desired_speed           = 2;
+                    GnC_param_guid_eta                = 2;
+                }
+                
+                //.. Environment - checked
                 double Ai_disturbance[3]; for(int i=0;i<3;i++) Ai_disturbance[i] = arr_Ai_est_dstb[i + 3*i_N];
                 double Ai_dist_var = arr_Ai_est_var[i_N]; 
 
-                //-------------------------------------------------------------------------------------------------------   
-                //.. MPPI modules - checked
-                
-                if(GnC_param_Guid_type >= 2){
-                    delta_u[0]         = arr_delta_u0[idx + MP_K*i_N];
-                    delta_u[1]         = arr_delta_u1[idx + MP_K*i_N];
-                    MPPI_ctrl_input[0] = arr_u0[i_N] + delta_u[0]; 
-                    MPPI_ctrl_input[1] = arr_u1[i_N] + delta_u[1];
-                }
-
-                //-------------------------------------------------------------------------------------------------------
                 //.. Path-Following-required information - checked
-                PF_required_info__distance_to_path(WP_WPs, PF_var_WP_idx_heading, state_var_Ri, PF_var_point_closest_on_path_i, &PF_var_WP_idx_passed, &PF_var_dist_to_path);
-                path_following_required_info__check_waypoint(WP_WPs, &PF_var_WP_idx_heading, state_var_Ri, GnC_param_virtual_target_distance);
-                path_following_required_info__VTP_decision(PF_var_dist_to_path, GnC_param_virtual_target_distance, PF_var_point_closest_on_path_i, PF_var_WP_idx_passed, WP_WPs, PF_var_VT_Ri);
-                                
-                //-------------------------------------------------------------------------------------------------------
-                //.. Guidance - checked
-                guidance_path_following__guidance_modules(GnC_param_Guid_type, PF_var_WP_idx_passed, PF_var_WP_idx_heading, (int)nWP, PF_var_VT_Ri, \
-                    state_var_Ri, state_var_Vi, state_var_Ai, GnC_param_virtual_target_distance, GnC_param_desired_speed, GnC_param_Kp_vel, GnC_param_Kd_vel, \
-                    GnC_param_Kp_speed, GnC_param_Kd_speed, GnC_param_guid_eta, MPPI_ctrl_input, guid_var_Ai_cmd, &lambda);
+                PF_required_info__distance_to_path(WP_WPs, PF_var_WP_idx_heading, \
+                    state_var_Ri, PF_var_point_closest_on_path_i, &PF_var_WP_idx_passed, &PF_var_dist_to_path);
+                path_following_required_info__check_waypoint(WP_WPs, \
+                    &PF_var_WP_idx_heading, state_var_Ri, GnC_param_distance_change_WP);
+                
+                //.. VT is not required to Guid_type 2
+                if(GnC_param_Guid_type != 2){
+                    path_following_required_info__VTP_decision(PF_var_dist_to_path, \
+                        GnC_param_virtual_target_distance, PF_var_point_closest_on_path_i, PF_var_WP_idx_passed,
+                        WP_WPs, PF_var_VT_Ri);
+                //     path_following_required_info__takeoff_to_first_WP(WP_WPs, \
+                //         state_var_Ri, PF_var_WP_idx_passed, GnC_param_dist_change_first_WP, PF_var_VT_Ri);
+                }
+                    
+                // weight by variance of GPR
+                double weight_by_var = 40. * min(Ai_dist_var, lim_var) ;
+                double Rw1w2[3];  for(int i=0;i<3;i++) Rw1w2[i] = WP_WPs[PF_var_WP_idx_heading][i] - WP_WPs[PF_var_WP_idx_passed][i];
+                double PF_var_unit_Rw1w2[3]; for(int i=0;i<3;i++) PF_var_unit_Rw1w2[i] = Rw1w2[i]/norm_(Rw1w2);
+                
+                magV            = norm_(state_var_Vi);
+                azim_elev_from_vec3(state_var_Vi, &FPA_azim_diy, &FPA_elev_diy);
 
+                if (GnC_param_Guid_type == 4) {
+                    path_following_required_info__cost_function_diy(MP_R, FPA_azim_diy, MPPI_ctrl_input, MP_Q, PF_var_dist_to_path, PF_var_cost_arr, MP_dt,\
+                        delta_u, magV, GnC_param_desired_speed, MP_gamma, state_var_att_ang, weight_by_var);
+                }
+                else {
+                    path_following_required_info__cost_function_1(MP_R, FPA_azim_diy, MPPI_ctrl_input, MP_Q[0], PF_var_dist_to_path, \
+                        MP_Q[1], state_var_att_ang, weight_by_var, PF_var_unit_Rw1w2, MP_cost_min_V_aligned, PF_var_cost_arr, MP_dt);
+                }              
+                    
+                // for terminal cost
+                if(i_N == 0){
+                    for(int i=0;i<3;i++) PF_var_init_point_closest_on_path[i] = PF_var_point_closest_on_path_i[i];
+                    PF_var_init_WP_idx_passed = PF_var_WP_idx_passed;
+                }
+                
+                
+                //.. skip this for terminal WP phase command
+                /*
+                if ( (PF_var_WP_idx_passed == 0) || (PF_var_WP_idx_heading == nWP - 1) )
+                    for(int i=0;i<3;i++) PF_var_cost_arr[i] = 0.;
+                */
+                
+                //.. Guidance - checked
+                guidance_path_following__guidance_modules(GnC_param_Guid_type, \
+                    PF_var_WP_idx_passed, PF_var_WP_idx_heading, (int)nWP, PF_var_VT_Ri, \
+                    state_var_Ri, state_var_Vi, state_var_Ai, GnC_param_virtual_target_distance, GnC_param_desired_speed, GnC_param_Kp_vel, GnC_param_Kd_vel, \
+                    GnC_param_Kp_speed, GnC_param_Kd_speed, GnC_param_guid_eta, MPPI_ctrl_input, guid_var_Ai_cmd);
                 // calc. simple rotor drag model
                 guidance_path_following__simple_rotor_drag_model(state_var_Vi, physical_param_psuedo_rotor_drag_coeff, cB_I, Fi_drag);
                 for(int i=0;i<3;i++) guid_var_Ai_rotor_drag[i] = Fi_drag[i]/physical_param_mass;
@@ -376,35 +433,15 @@ class MPPI_Guidance_Modules():
                 guidance_path_following__convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, guid_var_Ai_cmd_compensated, \
                     physical_param_mass, physical_param_T_max, WP_WPs, PF_var_WP_idx_heading, state_var_Ri, state_var_att_ang, \
                     GnC_param_del_psi_cmd_limit, &guid_var_T_cmd, guid_var_att_ang_cmd);
-                
-                //-------------------------------------------------------------------------------------------------------
-                // cost function   
-                magV = sqrt(state_var_Vi[0]*state_var_Vi[0]+state_var_Vi[1]*state_var_Vi[1]); //norm_(state_var_Vi);
-                azim_elev_from_vec3(state_var_Vi, &FPA_azim_diy, &FPA_elev_diy);
-
-                double weight_by_var = 40. * min(Ai_dist_var, lim_var) ;
                     
-                if (GnC_param_Guid_type == 4) {
-                    path_following_required_info__cost_function_diy(MP_R, lambda, MPPI_ctrl_input, MP_Q, PF_var_dist_to_path, PF_var_cost_arr, MP_dt,\
-                        delta_u, magV, GnC_param_desired_speed, MP_gamma, state_var_att_ang, weight_by_var);
-                    arr_tmp[0] = lambda;
-                    arr_tmp[1] = PF_var_cost_arr[0]; 
-                    arr_tmp[2] = PF_var_cost_arr[1];
-                    arr_tmp[3] = PF_var_cost_arr[2]; 
-                }
-                else {
-                    // weight by variance of GPR
-                    double Rw1w2[3];  for(int i=0;i<3;i++) Rw1w2[i] = WP_WPs[PF_var_WP_idx_heading][i] - WP_WPs[PF_var_WP_idx_passed][i];
-                    double PF_var_unit_Rw1w2[3]; for(int i=0;i<3;i++) PF_var_unit_Rw1w2[i] = Rw1w2[i]/norm_(Rw1w2);
-                    path_following_required_info__cost_function_1(MP_R, FPA_azim_diy, MPPI_ctrl_input, MP_Q[0], PF_var_dist_to_path, \
-                        MP_Q[1], state_var_att_ang, weight_by_var, PF_var_unit_Rw1w2, MP_cost_min_V_aligned, PF_var_cost_arr, MP_dt);
-                }
                     
                 for(int i_times_N = 0; i_times_N < (int)times_N; i_times_N++){
                     //------- Start - dynamics and integration --------//
                     //.. Controller - checked
-                    controller__attitude_controller(guid_var_att_ang_cmd, state_var_att_ang, state_var_Wb, GnC_param_tau_phi, GnC_param_tau_the, GnC_param_tau_psi, ctrl_var_Wb_cmd);
-                    controller__rate_controller(ctrl_var_Wb_cmd, state_var_Wb, GnC_param_tau_Wb, modif_dt, ctrl_var_err_Wb, ctrl_var_int_err_Wb);
+                    controller__attitude_controller(guid_var_att_ang_cmd, state_var_att_ang, state_var_Wb, \
+                        GnC_param_tau_phi, GnC_param_tau_the, GnC_param_tau_psi, ctrl_var_Wb_cmd);
+                    controller__rate_controller(ctrl_var_Wb_cmd, state_var_Wb, GnC_param_tau_Wb, \
+                        modif_dt, ctrl_var_err_Wb, ctrl_var_int_err_Wb);
                     
                     //.. Dynamics - checked
                     dynamics__equations_of_motions(cI_B, cB_I, guid_var_T_cmd, physical_param_mass, guid_var_Ai_disturbance, Ai_grav, \
@@ -418,7 +455,7 @@ class MPPI_Guidance_Modules():
                         state_var_Ri, state_var_Vb, state_var_att_ang, state_var_Wb, cI_B, cB_I, state_var_Vi);
                     //-------  End  - dynamics and integration --------//
                 }
-
+                
                 //.. stop - when arrive the terminal WP - skip
                 
                 //.. MPPI cost - checked
@@ -427,7 +464,7 @@ class MPPI_Guidance_Modules():
                 arr_stk[idx]    =   arr_stk[idx] + cost_sum;
 
             }
-
+            
             double terminal_cost = 0.;
             for(int i=0;i<3;i++) PF_var_final_point_closest_on_path[i] = PF_var_point_closest_on_path_i[i];
 
@@ -445,6 +482,15 @@ class MPPI_Guidance_Modules():
             }
             
             arr_stk[idx] = arr_stk[idx] + terminal_cost;
+
+            //.. MPPI_entropy
+            i_N = 0;
+            for(i_N = 0; i_N < MP_N; i_N++){
+                arr_numer0[idx + MP_K*i_N] = exp((-1/MP_beta)*arr_stk[idx])*arr_delta_u0[idx + MP_K*i_N];
+                arr_denom0[idx + MP_K*i_N] = exp((-1/MP_beta)*arr_stk[idx]);
+                arr_numer1[idx + MP_K*i_N] = exp((-1/MP_beta)*arr_stk[idx])*arr_delta_u1[idx + MP_K*i_N];
+                arr_denom1[idx + MP_K*i_N] = exp((-1/MP_beta)*arr_stk[idx]);
+            }
         }
         
         // utility functions
@@ -455,12 +501,6 @@ class MPPI_Guidance_Modules():
         __device__ double dot_(double x[3], double y[3]) 
         {
             return x[0]*y[0] + x[1]*y[1] + x[2]*y[2];
-        }
-        __device__ double sign_(double x)
-        {
-            if (x > 0.0)      return  1.0;
-            else if (x < 0.0) return -1.0;
-            else              return  0.0;
         }
         __device__ void cross_(double x[3], double y[3], double res[3]) 
         {
@@ -517,10 +557,8 @@ class MPPI_Guidance_Modules():
             double QR_Ri[3], double QR_point_closest_on_path_i[3], int* QR_WP_idx_passed, double* dist_to_path)
         {
             // calc. variables
-            dist_to_path[0] = 99999.;
-            bool    flag_Update = false ;
-            int     QR_WP_idx_passed_prev   =   QR_WP_idx_passed[0];
-            for(int i_WP = QR_WP_idx_heading; i_WP > max(QR_WP_idx_passed[0] - 1, 0); i_WP--)
+            dist_to_path[0] = 999999.;
+            for(int i_WP = QR_WP_idx_heading; i_WP >= QR_WP_idx_passed[0]; i_WP--)
             {
                 double Rw1w2[3]; for(int i=0;i<3;i++) Rw1w2[i] = WP_WPs[i_WP][i] - WP_WPs[i_WP-1][i];
                 double mag_Rw1w2 = norm_(Rw1w2);
@@ -529,20 +567,12 @@ class MPPI_Guidance_Modules():
                 double p_closest_on_path[3]; for(int i=0;i<3;i++) p_closest_on_path[i] = WP_WPs[i_WP-1][i] + mag_w1p * Rw1w2[i]/max(mag_Rw1w2,0.001);
                 double tmp[3]; for(int i=0;i<3;i++) tmp[i] = p_closest_on_path[i] - QR_Ri[i];
                 double mag_Rqp = norm_(tmp);
-                if(dist_to_path[0] > mag_Rqp){
+                if(dist_to_path[0] < mag_Rqp){
+                    break;
+                }else{
                     dist_to_path[0] = mag_Rqp;
                     for(int i=0;i<3;i++) QR_point_closest_on_path_i[i] = p_closest_on_path[i];
-                    QR_WP_idx_passed[0]= max(i_WP-1, QR_WP_idx_passed_prev);
-                    flag_Update     =   true ;
-                }
-                else if( flag_Update == false && i_WP == QR_WP_idx_passed_prev + 1  )
-                {
-                    dist_to_path[0] = mag_Rqp;
-                    for(int i=0;i<3;i++) QR_point_closest_on_path_i[i] = p_closest_on_path[i];
-                    QR_WP_idx_passed[0]= QR_WP_idx_passed_prev;
-                }
-                else{
-                /* Nothing  */
+                    QR_WP_idx_passed[0] = max(i_WP-1, 0);
                 }
             }
         }
@@ -582,6 +612,16 @@ class MPPI_Guidance_Modules():
                 }
             }
         }
+        __device__ void path_following_required_info__takeoff_to_first_WP(double WP_WPs[nWP][3], \
+            double QR_Ri[3], int QR_WP_idx_passed, double QR_dist_change_first_WP, double PF_var_VT_Ri[3])
+        {
+            if(QR_WP_idx_passed < 1){
+                double dist_to_WP[3]; for(int i=0; i<3; i++) dist_to_WP[i] = WP_WPs[1][i] - QR_Ri[i];
+                if(norm_(dist_to_WP) > QR_dist_change_first_WP){
+                    for(int i=0; i<3; i++) PF_var_VT_Ri[i] = WP_WPs[1][i];
+                }
+            }
+        }
         __device__ void path_following_required_info__cost_function_1(double R[3], double FPA_azim_diy, double MPPI_ctrl_input[2], \
             double Q0, double dist_to_path, double Q1, double att_ang[3], double weight_by_var, \
             double unit_W1W2[3], double min_V_aligned, double cost_arr[3], double dt)
@@ -604,11 +644,12 @@ class MPPI_Guidance_Modules():
             cost_arr[1] = x0Q0x0 * dt;
             cost_arr[2] = weight_by_var * x1Q1x1 * dt;
         }
-        __device__ void path_following_required_info__cost_function_diy(double R[3], double err_azim, double MPPI_ctrl_input[2], \
+        __device__ void path_following_required_info__cost_function_diy(double R[3], double FPA_azim_diy, double MPPI_ctrl_input[2], \
             double Q[3], double dist_to_path, double cost_arr[3], double dt, double delta_u[2], double magV, \
             double refV, double MP_gamma, double att_ang[3], double weight_by_var)
         {
             // uRu of LQR cost, set low value of norm(R)
+            double uRu  = 0.;
             double uRdu = 0.;
 
             double u0   = MPPI_ctrl_input[0]; 
@@ -616,16 +657,14 @@ class MPPI_Guidance_Modules():
             double du0  = delta_u[0];
             double du1  = delta_u[1];
 
-            err_azim    = 1.0;
-
-            uRdu        = MP_gamma * ( ( R[0] * (u0-du0) ) * du0 + ( R[1] * err_azim * err_azim * (u1-du1) ) * du1 ); 
+            uRdu        = MP_gamma * ( ( R[0] * u0 ) * du0 + ( R[1] * FPA_azim_diy * FPA_azim_diy * u1 ) * du1 ); 
             
             // path following performance
             double x0     = min( dist_to_path / 5.0, 1.0 );
             double x0Q0x0 = x0 * Q[0] * x0;
 
             // desired velocity
-            double x1     = min( abs(magV - refV)/refV, 1.0 );
+            double x1     = min( abs(magV - refV)/refV, 1.0); 
             double x1Q1x1 = x1 * Q[1] * x1;
             
             // attitude control stability
@@ -635,7 +674,7 @@ class MPPI_Guidance_Modules():
             // total cost
             cost_arr[0] = uRdu * dt;
             cost_arr[1] = (x0Q0x0 + x1Q1x1) * dt ;
-            cost_arr[2] = (weight_by_var * x2Q2x2) * dt;
+            cost_arr[2] = weight_by_var * x2Q2x2 * dt;
         }
         __device__ void path_following_required_info__terminal_cost_1(double P1, double WP_WPs[nWP][3], \
             int PF_var_init_WP_idx_passed, int PF_var_final_WP_idx_passed,\
@@ -696,22 +735,21 @@ class MPPI_Guidance_Modules():
             //-------------------------------------------------------------------------------------------------------------
             
             // terminal cost
-            terminal_cost[0] = P[0] * 0.5 * ( 1.0 - X_dir ) *0.0 + P[1] * x0 * x0 + P[2] * x1 * x1;
+            terminal_cost[0] = P[0] * 0.5 * ( 1.0 - X_dir ) + P[1] * x0 + P[2] * x1 ;
         }
         __device__ void guidance_path_following__guidance_modules(int QR_Guid_type, \
             int QR_WP_idx_passed, int QR_WP_idx_heading, int WP_WPs_shape0, double VT_Ri[3], \
             double QR_Ri[3], double QR_Vi[3], double QR_Ai[3], double QR_virtual_target_distance, double QR_desired_speed, double QR_Kp_vel, double QR_Kd_vel, \
-            double QR_Kp_speed, double QR_Kd_speed, double QR_guid_eta, double MPPI_ctrl_input[2], double Aqi_cmd[3], double *lambda)
+            double QR_Kp_speed, double QR_Kd_speed, double QR_guid_eta, double MPPI_ctrl_input[2], double Aqi_cmd[3])
         {
             // starting phase
             if (QR_WP_idx_passed < 1){
                 QR_Guid_type = 0;
-                QR_desired_speed = QR_desired_speed * 0.8;
+                QR_desired_speed = 3.0;
             }
             // terminal phase
-            if (QR_WP_idx_heading >= (WP_WPs_shape0 - 1)){
+            if (QR_WP_idx_heading == (WP_WPs_shape0 - 1)){
                 QR_Guid_type = 0;
-                QR_desired_speed = QR_desired_speed * 0.5;
             }
             
             // guidance command
@@ -719,18 +757,17 @@ class MPPI_Guidance_Modules():
                 //.. guidance - position & velocity control
                 // position control
                 double err_Ri[3]; for(int i=0;i<3;i++) err_Ri[i] = VT_Ri[i] - QR_Ri[i];
-                double Kp_pos = 0.5; //QR_desired_speed/max(norm_(err_Ri),QR_desired_speed); // (terminal WP, tgo < 1) --> decreasing speed
+                double Kp_pos = QR_desired_speed/max(norm_(err_Ri),QR_desired_speed); // (terminal WP, tgo < 1) --> decreasing speed
                 double derr_Ri[3]; for(int i=0;i<3;i++) derr_Ri[i] = 0. - QR_Vi[i];
                 double Vqi_cmd[3]; for(int i=0;i<3;i++) Vqi_cmd[i] = Kp_pos * err_Ri[i];
-                double dVqi_cmd[3]; for(int i=0;i<3;i++) dVqi_cmd[i] = Kp_pos * derr_Ri[i]*0.0;
+                double dVqi_cmd[3]; for(int i=0;i<3;i++) dVqi_cmd[i] = Kp_pos * derr_Ri[i];
                 // velocity control
                 double err_Vi[3]; for(int i=0;i<3;i++) err_Vi[i] = Vqi_cmd[i] - QR_Vi[i];
                 double derr_Vi[3]; for(int i=0;i<3;i++) derr_Vi[i] = dVqi_cmd[i] - QR_Ai[i];
-                QR_Kp_vel = 3.0 * Kp_pos;
-                for(int i=0;i<3;i++) Aqi_cmd[i] = QR_Kp_vel * err_Vi[i] + QR_Kd_vel * derr_Vi[i]*0.0;
+                for(int i=0;i<3;i++) Aqi_cmd[i] = QR_Kp_vel * err_Vi[i] + QR_Kd_vel * derr_Vi[i];
             }
             else if ( (QR_Guid_type == 3) || (QR_Guid_type == 4) ){
-                QR_guid_eta = max(MPPI_ctrl_input[1],0.5);
+                QR_guid_eta = MPPI_ctrl_input[1];
                 // calc. variables
                 double QR_mag_Vi = norm_(QR_Vi);
                 double FPA_azim, FPA_elev; azim_elev_from_vec3(QR_Vi, &FPA_azim, &FPA_elev);
@@ -748,7 +785,6 @@ class MPPI_Guidance_Modules():
                 double err_azim, err_elev; azim_elev_from_vec3(Rqtw, &err_azim, &err_elev);
                 Aqw_cmd[1]  =   QR_guid_eta * QR_mag_Vi * sin(err_azim);
                 Aqw_cmd[2]  =   -2.0 * QR_mag_Vi * sin(err_elev);
-                *lambda     =   err_azim;
                 // command coordinate change
                 double cW_I[3][3]; transpose_(QR_cI_W, cW_I);
                 matmul_(cW_I, Aqw_cmd, Aqi_cmd);
@@ -838,7 +874,7 @@ class MPPI_Guidance_Modules():
             
             // att_angle
             double cthe =   cos( att_ang[1] )   ;
-            double sthe =   1.0 / cthe          ;
+            double sthe =   1.0 / cthe   ;
             double tthe =   tan( att_ang[1] )   ;
             double sphi =   sin( att_ang[0] )   ;
             double cphi =   cos( att_ang[0] )   ;

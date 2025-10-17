@@ -17,25 +17,43 @@ from flight_functions.utility_funcs import azim_elev_from_vec3, DCM_from_euler_a
 
 
 #.. guidance modules
-def guidance_modules(QR_Guid_type, QR_WP_idx_passed, QR_WP_idx_heading, WP_WPs_shape0,VT_Ri, QR_Ri, QR_Vi, QR_Ai,
-                     QR_desired_speed, QR_Kp_vel, QR_Kd_vel, QR_guid_eta, MPPI_ctrl_input, QR_stop_flag):
+def guidance_modules(QR_Guid_type, QR_WP_idx_passed, QR_WP_idx_heading, WP_WPs_shape0, VT_Ri, QR_Ri, QR_Vi, QR_Ai,
+                     QR_desired_speed, QR_Kp_vel, QR_Kd_vel, QR_guid_eta, MPPI_ctrl_input, QR_intr_flag, QR_intr_prev):
     
+    QR_reset_mppi = 0
+    QR_tran_flag  = 0
+
+    #-------------------------------------------------------------
     # starting phase
     if QR_WP_idx_passed < 1:
-        QR_Guid_type     = 0
-        QR_desired_speed = 3.0
+        QR_tran_flag  = 1
         pass
 
+    #-------------------------------------------------------------    
+    # interrupt phase
+    if (QR_intr_flag == 1):
+        QR_Guid_type = 0
+        QR_reset_mppi = 1
+
+    if (QR_intr_flag == 0 and QR_intr_prev == 1):
+        QR_tran_flag = 1
+
+    QR_intr_prev = QR_intr_flag
+
+    #-------------------------------------------------------------
+    # transition phase (stop -> pursuit guidance)
+    if (QR_tran_flag == 1):
+        QR_Guid_type = 0
+        QR_reset_mppi = 1
+        if (np.linalg.norm(QR_Vi) > 1.0):
+            QR_tran_flag = 0
+   
+    #-------------------------------------------------------------
     # terminal phase
-    if (QR_WP_idx_heading == (WP_WPs_shape0 - 1)):
+    if (QR_WP_idx_heading >= (WP_WPs_shape0 - 1)):
         QR_Guid_type = 0
-        pass
-    
-    # stop phase
-    if (QR_stop_flag == 1):
-        QR_Guid_type = 0
-        QR_desired_speed = 0.0
 
+    #-------------------------------------------------------------
     # guidance command
     Aqi_cmd     =   np.zeros(3)
 
@@ -43,19 +61,20 @@ def guidance_modules(QR_Guid_type, QR_WP_idx_passed, QR_WP_idx_heading, WP_WPs_s
         #.. guidance - position & velocity control
         # position control
         err_Ri               = VT_Ri - QR_Ri
-        Kp_pos               = QR_desired_speed/max(np.linalg.norm(err_Ri),QR_desired_speed)     # (terminal WP, tgo < 1) --> decreasing speed
+        Kp_pos               = 0.5 #QR_desired_speed/max(np.linalg.norm(err_Ri),QR_desired_speed)     # (terminal WP, tgo < 1) --> decreasing speed
         derr_Ri              = 0. - QR_Vi
         Vqi_cmd              = Kp_pos * err_Ri
-        dVqi_cmd             = Kp_pos * derr_Ri
+        dVqi_cmd             = Kp_pos * derr_Ri *0.0
         # velocity control
         err_Vi               = Vqi_cmd - QR_Vi
         derr_Vi              = dVqi_cmd - QR_Ai
-        Aqi_cmd              = QR_Kp_vel * err_Vi + QR_Kd_vel * derr_Vi
+        QR_Kp_vel            = Kp_pos * 3.0
+        Aqi_cmd              = QR_Kp_vel * err_Vi + QR_Kd_vel * derr_Vi * 0.0
     
     elif (QR_Guid_type == 3) or (QR_Guid_type == 4): 
         
         #.. guidance - GL - parameters by MPPI
-        QR_guid_eta          = MPPI_ctrl_input[1]
+        QR_guid_eta          = np.maximum(MPPI_ctrl_input[1],0.5)
         
         # calc. variables
         QR_mag_Vi            = np.linalg.norm(QR_Vi)
@@ -76,7 +95,7 @@ def guidance_modules(QR_Guid_type, QR_WP_idx_passed, QR_WP_idx_heading, WP_WPs_s
         cW_I                 = np.transpose(QR_cI_W)
         Aqi_cmd              = np.matmul(cW_I, Aqw_cmd)
 
-    return Aqi_cmd, np.linalg.norm(QR_Vi)
+    return Aqi_cmd, QR_Guid_type, QR_intr_prev, QR_reset_mppi
 
 #.. prev_convert_Ai_cmd_to_thrust_and_att_ang_cmd
 def convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, Ai_cmd, mass, T_max, WP_WPs, WP_idx_heading, Ri, att_ang, del_psi_cmd_limit):    
@@ -110,8 +129,8 @@ def convert_Ai_cmd_to_thrust_and_att_ang_cmd(cI_B, Ai_cmd, mass, T_max, WP_WPs, 
     euler_psi   =   np.array([0., 0., psi_des])
     mat_psi     =   DCM_from_euler_angle(euler_psi)
     Apsi_cmd    =   np.matmul(mat_psi , Ai_cmd)
-    phi         =   m.asin(Apsi_cmd[1]/mag_Ai_cmd)
-    sintheta    =   min(max(-Apsi_cmd[0]/m.cos(phi)/mag_Ai_cmd, -1.), 1.)
+    phi         =   min(max(m.asin(Apsi_cmd[1]/mag_Ai_cmd), -0.5236), 0.5236)
+    sintheta    =   min(max(-Apsi_cmd[0]/m.cos(phi)/mag_Ai_cmd, -0.5236), 0.5236)
     theta       =   m.asin(sintheta)
     psi         =   psi_des
             

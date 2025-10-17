@@ -47,24 +47,29 @@ class Node_MPPI_Output(Node):
         # self.GPRlog_Y = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_Y.txt",'w+')
         # self.GPRlog_Z = open("/home/user/log/point_mass_6d/datalogfile/GPRlog_Z.txt",'w+')
                 
-        #===================================================================================================================
-        ###.. Subscribers ..###
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Subscribers
 
         #.. subscriptions - from ROS2 msgs to ROS2 msgs
         self.MPPI_input_int_Q6_subscription =   self.create_subscription(Int32MultiArray, 'MPPI/in/int_Q6', self.subscript_MPPI_input_int_Q6, qos_profile_sensor_data)
         self.MPPI_input_dbl_Q6_subscription =   self.create_subscription(Float64MultiArray, 'MPPI/in/dbl_Q6', self.subscript_MPPI_input_dbl_Q6, qos_profile_sensor_data)
-        self.MPPI_input_dbl_VT_subscription =   self.create_subscription(Float64MultiArray, 'MPPI/in/dbl_VT', self.subscript_MPPI_input_dbl_VT, qos_profile_sensor_data)
         self.MPPI_input_dbl_WP_subscription =   self.create_subscription(Float64MultiArray, 'MPPI/in/dbl_WP', self.subscript_MPPI_input_dbl_WP, qos_profile_sensor_data)
         self.GPR_input_dbl_NDO_subscription =   self.create_subscription(Float64MultiArray, 'GPR/in/dbl_Q6', self.subscript_GPR_input_dbl_NDO, qos_profile_sensor_data)
         
-        #===================================================================================================================
-        ###.. Publishers ..###
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Publishers
 
         #.. publishers - from ROS2 msgs to ROS2 msgs
         self.MPPI_output_publisher_         =   self.create_publisher(Float64MultiArray, 'MPPI/out/dbl_MPPI', 10)
 
-        #===================================================================================================================
-        ###.. Timers ..###
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Timers
 
         # callback PF_MPPI_param
         period_MPPI_param       =   self.QR.MPPI_param.dt_MPPI
@@ -77,20 +82,20 @@ class Node_MPPI_Output(Node):
 
         pass
     
-    #===================================================================================================================
-    # Subscriber Call Back Functions  
-    #===================================================================================================================
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Subscriber Call Back Functions  
 
     #.. subscript_MPPI_input_int_Q6
     def subscript_MPPI_input_int_Q6(self, msg):
-        self.QR.PF_var.WP_idx_heading  =   msg.data[0]
-        self.QR.PF_var.WP_idx_passed   =   msg.data[1]
-        self.QR.GnC_param.Guid_type    =   msg.data[2]
-        self.QR.PF_var.reWP_flag2mppi  =   msg.data[3]
+        self.QR.PF_var.WP_idx_heading   =   msg.data[0]
+        self.QR.PF_var.WP_idx_passed    =   msg.data[1]
+        self.QR.GnC_param.Guid_type     =   msg.data[2]
+        self.QR.PF_var.reset_flag2mppi  =   msg.data[3]
 
         self.MPPI_input_int_Q6_received =  True
-        # self.get_logger().info('subscript_MPPI_input_int_Q6 msgs: {0}'.format(msg.data))
-        pass
     
     #.. subscript_MPPI_input_dbl_Q6
     def subscript_MPPI_input_dbl_Q6(self, msg):
@@ -105,14 +110,6 @@ class Node_MPPI_Output(Node):
         self.QR.state_var.att_ang[2]   =   msg.data[8]
         self.QR.guid_var.T_cmd         =   msg.data[9]
         # self.get_logger().info('subscript_MPPI_input_dbl_Q6 msgs: {0}'.format(msg.data))
-        pass
-            
-    #.. subscript_MPPI_input_dbl_VT
-    def subscript_MPPI_input_dbl_VT(self, msg):
-        self.QR.PF_var.VT_Ri[0]        =   msg.data[0]
-        self.QR.PF_var.VT_Ri[1]        =   msg.data[1]
-        self.QR.PF_var.VT_Ri[2]        =   msg.data[2]
-        # self.get_logger().info('subscript_MPPI_input_dbl_VT msgs: {0}'.format(msg.data))
         pass
             
     #.. subscript_MPPI_input_dbl_WP
@@ -134,23 +131,27 @@ class Node_MPPI_Output(Node):
         
         self.GP.GPR_update(self.QR.guid_var.out_NDO)
  
-    #===================================================================================================================
-    # Publication Functions   
-    #===================================================================================================================
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region Publication Functions   
     
     #.. publish_MPPI_output
     def publish_MPPI_output(self):
         msg                 =   Float64MultiArray()
-        msg.data            =   [self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1]]
+        msg.data            =   [self.QR.guid_var.MPPI_ctrl_input[0], self.QR.guid_var.MPPI_ctrl_input[1], self.QR.guid_var.MPPI_calc_time]
         
         self.MPPI_output_publisher_.publish(msg)
         # self.get_logger().info('mppi: {0}'.format(np.linalg.norm(self.M)))
         # self.get_logger().info("subscript_MPPI_output: [0]=" + str(self.MPPI_ctrl_input[0]) +", [1]=" + str(self.MPPI_ctrl_input[1]) +", [2]=" + str(self.MPPI_ctrl_input[2]))
         pass
 
-    #===================================================================================================================
-    # Functions
-    #===================================================================================================================
+    # endregion
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # region functions
 
     ###.. MPPI functions ..###
     #.. PF_MPPI_param 
@@ -170,10 +171,11 @@ class Node_MPPI_Output(Node):
 
         if self.MPPI_setting_complete == True:
 
-            if self.QR.PF_var.reWP_flag2mppi == 1:
+            if self.QR.PF_var.reset_flag2mppi == 1:
                 # self.get_logger().info('PATH FOLLOWING RESTART!!!')
                 self.MG.u0  =  self.MG.MP.u0_init * np.ones(self.MG.MP.N)
                 self.MG.u1  =  self.MG.MP.u1_init * np.ones(self.MG.MP.N)
+                self.QR.guid_var.MPPI_ctrl_input = np.array([self.MG.MP.u0_init, self.MG.MP.u1_init]) 
                 self.GP.GP_param.set_values(self.GP.GP_param.dt_GPR, self.GP.GP_param.ne_GPR)
                 
                 pass
@@ -184,9 +186,10 @@ class Node_MPPI_Output(Node):
                 #.. disturbance in MPPI
                 self.MG.Ai_est_dstb[:,0] = self.GP.GP_param.me_x_array
                 self.MG.Ai_est_dstb[:,1] = self.GP.GP_param.me_y_array
-                self.MG.Ai_est_dstb[:,2] = self.GP.GP_param.me_z_array
+                # self.MG.Ai_est_dstb[:,2] = self.GP.GP_param.me_z_array
+                self.MG.Ai_est_dstb[:,2] = self.QR.guid_var.out_NDO[2]*np.ones(self.MG.MP.N)
 
-                self.MG.Ai_est_var[:,0] = self.GP.GP_param.var_x_array 
+                self.MG.Ai_est_var[:,0] = np.minimum(self.GP.GP_param.var_x_array + 1e-2, 1e0)
         
             else:
                 self.MG.Ai_est_dstb[:,0] = self.QR.guid_var.out_NDO[0]*np.ones(self.MG.MP.N)
@@ -194,7 +197,8 @@ class Node_MPPI_Output(Node):
                 self.MG.Ai_est_dstb[:,2] = self.QR.guid_var.out_NDO[2]*np.ones(self.MG.MP.N)
 
             #.. MPPI algorithm
-            self.QR.guid_var.MPPI_ctrl_input, self.QR.guid_var.MPPI_calc_time = self.MG.run_MPPI_Guidance(self.QR, self.WP.WPs)
+            if self.QR.PF_var.reset_flag2mppi == 0:
+                self.QR.guid_var.MPPI_ctrl_input, self.QR.guid_var.MPPI_calc_time = self.MG.run_MPPI_Guidance(self.QR, self.WP.WPs)
 
             self.publish_MPPI_output()
         else:

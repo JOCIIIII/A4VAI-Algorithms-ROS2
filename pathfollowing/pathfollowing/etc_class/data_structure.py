@@ -74,11 +74,16 @@ class Path_Following_Var():
         self.VT_Ri                       =   np.array([0., 0., 0.])
         self.WP_idx_passed               =   0
         self.WP_idx_heading              =   1
+        self.PF_goal                     =   False
         self.PF_done                     =   False
         self.WP_manual                   =   0
         self.reWP_flag                   =   0 # 20240914 diy
-        self.reWP_flag2mppi              =   0 # 241223 diy
+        self.reset_flag2mppi             =   0 # 241223 diy
         self.stop_flag                   =   0
+        self.intr_flag                   =   0
+        self.intr_prev                   =   0
+        self.coli_flag                   =   0
+        self.tran_flag                   =   0
         self.point_closest_on_path_i     =   np.array([0., 0., 0.])
         self.dist_to_path                =   9999.
         self.unit_Rw1w2                  =   np.array([1., 0., 0.])
@@ -128,9 +133,10 @@ class Guid_Var():
         self.out_NDO            =   np.array([0., 0., 0.])
         self.z_NDO              =   np.array([0., 0., 0.])
         self.Ai_rotor_drag      =   np.array([0., 0., 0.])
-        self.MPPI_ctrl_input    =   np.zeros(2)
+        self.MPPI_ctrl_input    =   np.array([0.5, 2.])
         self.MPPI_calc_time     =   0.
         self.qd_cmd             =   np.array([0., 0., 0., 0.])
+        self.guid_type_used     =   0
         pass
     pass
 
