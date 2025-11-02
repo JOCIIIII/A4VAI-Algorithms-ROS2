@@ -7,7 +7,7 @@
 #include <random>
 
 std::default_random_engine gen;
-std::string lidar_topic = "/airsim_node/SimpleFlight/lidar/points/velo"; 
+std::string lidar_topic = "/airsim_node/SimpleFlight/lidar/points/RPLIDAR_A3"; 
 
 // VLP-16 
 int N_SCAN = 16;
@@ -81,22 +81,24 @@ private:
 
         // Convert to new point cloud
         for (size_t point_id = 0; point_id < pc->points.size(); ++point_id) {
-            PointXYZIRT new_point;
-            new_point.x = pc->points[point_id].x;
-            new_point.y = -pc->points[point_id].y;
-            new_point.z = -pc->points[point_id].z;
-            new_point.intensity = 2550;
-
-            // 16 ring. Index range is 0~15, from up to down.
-            float ang_bottom = 15.0 + 0.1;
-            float ang_res_y = 2.0;
-            float verticalAngle = atan2(new_point.z, sqrt(new_point.x * new_point.x + new_point.y * new_point.y)) * 180 / M_PI;
-            float rowIdn = (verticalAngle + ang_bottom) / ang_res_y;
-
-            new_point.ring = static_cast<uint16_t>(rowIdn);
-            new_point.time = (static_cast<float>(point_id) / N_SCAN) * 0.1 / Horizon_SCAN;
-
-            pc_new->points.push_back(new_point);
+            if (pc->points[point_id].z > 0.0) {
+                PointXYZIRT new_point;
+                new_point.x = pc->points[point_id].x;
+                new_point.y = pc->points[point_id].y;
+                new_point.z = pc->points[point_id].z;
+                new_point.intensity = 2550;
+    
+                // 16 ring. Index range is 0~15, from up to down.
+                float ang_bottom = 15.0 + 0.1;
+                float ang_res_y = 2.0;
+                float verticalAngle = atan2(new_point.z, sqrt(new_point.x * new_point.x + new_point.y * new_point.y)) * 180 / M_PI;
+                float rowIdn = (verticalAngle + ang_bottom) / ang_res_y;
+    
+                new_point.ring = static_cast<uint16_t>(rowIdn);
+                new_point.time = (static_cast<float>(point_id) / N_SCAN) * 0.1 / Horizon_SCAN;
+    
+                pc_new->points.push_back(new_point);
+            }
         }
 
         // Add noise to the point cloud

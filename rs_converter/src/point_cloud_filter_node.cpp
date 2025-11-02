@@ -48,20 +48,20 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::fromROSMsg(*input_cloud_msg, *input_cloud);
 
-        // Conditional Removal Filter
+        // Conditional Removal Filter (확장된 감지 범위 - 더 일찍 회피)
         pcl::ConditionAnd<pcl::PointXYZ>::Ptr range_cond(new pcl::ConditionAnd<pcl::PointXYZ>());
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("x", pcl::ComparisonOps::GT, 0.4)));
+            new pcl::FieldComparison<pcl::PointXYZ>("x", pcl::ComparisonOps::GT, 0.3)));  // 최소거리: 0.4 → 0.3
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("x", pcl::ComparisonOps::LT, 7.0)));
+            new pcl::FieldComparison<pcl::PointXYZ>("x", pcl::ComparisonOps::LT, 15.0))); // 최대거리: 7.0 → 15.0 (더 멀리 감지)
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("y", pcl::ComparisonOps::GT, -7.0)));
+            new pcl::FieldComparison<pcl::PointXYZ>("y", pcl::ComparisonOps::GT, -10.0))); // 측면: ±7 → ±10
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("y", pcl::ComparisonOps::LT, 7.0)));
+            new pcl::FieldComparison<pcl::PointXYZ>("y", pcl::ComparisonOps::LT, 10.0)));
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::GT, -4.0)));
+            new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::GT, -5.0)));  // 수직: ±4 → ±5
         range_cond->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
-            new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::LT, 4.0)));
+            new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::LT, 5.0)));
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::ConditionalRemoval<pcl::PointXYZ> condrem;
@@ -109,7 +109,7 @@ private:
         while (cloud->points.size() < min_points)
         {
             pcl::PointXYZ point;
-            point.x = 60.0;
+            point.x = 0.0;
             point.y = std::rand() % 14 - 7.0;
             point.z = std::rand() % 8 - 4.0;
             cloud->points.push_back(point);
