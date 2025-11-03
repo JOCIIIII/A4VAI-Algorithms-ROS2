@@ -112,7 +112,7 @@ class FoxgloveNode(Node):
 
         self.danger_distance_threshold = 10.0  # m
         self.warning_distance_threshold = 15.0  # m
-        self.path_angle_threshold = np.deg2rad(30)  # 30도
+        self.path_angle_threshold = np.deg2rad(24)  # 30도
         self.velocity_threshold = 5.0  # m/s (접근 속도)
 
         # Collision Avoidance State Variables
