@@ -11,7 +11,7 @@ from .data_class import *
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from rclpy.clock import Clock
-
+from px4_msgs.msg import FusionWeight
 # endregion
 # ----------------------------------------------------------------------------------------#
 
@@ -39,14 +39,15 @@ def state_logger(self):
         self.mode_status.COLLISION_AVOIDANCE,
     
     )
-    self.sim_var.flight_log.write(flightlog)
+    # self.sim_var.flight_log.write(flightlog)
 
 def set_initial_variables(classIn, dir, sim_name):
     
     classIn.state_var      = StateVariable()
     classIn.offboard_var   = OffboardVariable()
     classIn.guid_var       = GuidVariable()
-    classIn.mode_flag      = ModeStatus()
+    classIn.mode_status      = ModeStatus()
+    classIn.flags          = Flags()
     classIn.offboard_mode  = OffboardControlModeState()
     classIn.modes          = VehicleModes()
     classIn.veh_att_set    = VehicleAttitudeSetpointState()
@@ -63,10 +64,10 @@ def set_initial_variables(classIn, dir, sim_name):
 
     classIn.qos_profile_lidar = QoSProfile(
         reliability=ReliabilityPolicy.BEST_EFFORT,
-        depth=10
+        depth=1
     )
 
-    
+    classIn.weight = FusionWeight()
     set_logging_file(classIn)
 
 def set_wp(self):
@@ -84,13 +85,14 @@ def set_wp(self):
     self.guid_var.real_wp_x = list(data["x"])
     self.guid_var.real_wp_y = list(data["y"])
     self.guid_var.real_wp_z = list(data["z"])
+    self.get_logger().info(f"Waypoint set: {self.guid_var.waypoint_x}, {self.guid_var.waypoint_y}, {self.guid_var.waypoint_z}")
 
 def set_logging_file(self):
     # file name like 20241216_225040_path_following.csv
     current_time = datetime.now() + timedelta(hours=9)
     log_file_name = current_time.strftime("%Y%m%d_%H%M%S_") + self.sim_var.sim_name + ".csv"
     log_path = os.path.join((self.sim_var.dir + '/log'), log_file_name)
-    self.sim_var.flight_log = open(log_path, "w")
+    # self.sim_var.flight_log = open(log_path, "w")
 
 def publish_to_plotter(self):
     self.pub_func_plotter.publish_global_waypoint_to_plotter(self.guid_var)
@@ -128,8 +130,7 @@ def BodytoNED(vel_body_cmd, dcm):
 
 # convert NED frame to Body frame
 def NEDtoBody(vel_ned, dcm):
-    u, v, w = np.array((dcm @ vel_ned).tolist())
-    vel_body = np.array([u, v, w])
+    vel_body = (dcm @ vel_ned).tolist()
     return vel_body
 
 

@@ -50,18 +50,28 @@ class ONNXPolicy:
         return np.clip(normalized, -clip_obs, clip_obs)
 
     def predict(self, obs: np.ndarray) -> np.ndarray:
-        """Run ONNX model prediction and map to [-1.5, 1.5] with your scaling."""
+        """Run ONNX model prediction and map with expanded vy/yaw range."""
         inp = np.expand_dims(self.normalize_input(obs), axis=0).astype(np.float32)
         outputs = self.session.run([self.output_name], {self.input_name: inp})
         actions = np.array(outputs[0][0], dtype=np.float32)  # shape (4,)
 
         low, high = -1.5, 1.5
-        # Your original scaling:
+
+        # vx: keep original scaling (will be overridden to 3.0 in test anyway)
         vx = 2.0 * ((actions[0] - 0.0) / (high - 0.0)) - 1.0
-        vy = 2.0 * ((actions[1] - low) / (high - low)) - 1.0
+
+        # vy: expand range to [-6.0, 6.0] for stronger lateral avoidance
+        vy_normalized = 2.0 * ((actions[1] - low) / (high - low)) - 1.0  # [-1, 1]
+        vy = vy_normalized * 6.0  # [-6.0, 6.0]
+
+        # vz: keep original
         vz = 2.0 * ((actions[2] - low) / (high - low)) - 1.0
-        vyaw = 2.0 * ((actions[3] - low) / (high - low)) - 1.0
-        return np.clip([vx, vy, vz, vyaw], low, 1.0)
+
+        # vyaw: expand range to [-3.0, 3.0] for stronger turning
+        vyaw_normalized = 2.0 * ((actions[3] - low) / (high - low)) - 1.0  # [-1, 1]
+        vyaw = vyaw_normalized * 3.0  # [-3.0, 3.0]
+
+        return np.array([vx, vy, vz, vyaw], dtype=np.float32)
 
 
 class OnnxControllerNode(Node):
@@ -131,15 +141,26 @@ class OnnxControllerNode(Node):
 
         # Predict and publish Twist
         actions = self.policy.predict(input_data)
+
         cmd = Twist()
         cmd.linear.x = float(actions[0])
         cmd.linear.y = float(actions[1])
         cmd.linear.z = float(actions[2])
-        cmd.angular.z = (float(actions[3]))
+        cmd.angular.z = float(actions[3])
+
+
+        # 로깅: 위험 장애물 위치 정보 포함
+        if not hasattr(self, '_cmd_log_initialized'):
+            self._cmd_log_initialized = True
+            import os
+            log_dir = "/home/user/workspace/ros2/logs"
+            os.makedirs(log_dir, exist_ok=True)
+            with open("/home/user/workspace/ros2/logs/cmd.csv", "w") as f:
+                f.write("vx,vy_final,vz,yaw_final,vy_mag,yaw_mag,closest_x,closest_y,avg_y,obstacle_side\n")
 
 
         with open("/home/user/workspace/ros2/logs/cmd.csv", "a") as f:
-            f.write(f"{cmd.linear.x}, {cmd.linear.y}, {cmd.linear.z}, {cmd.angular.z}\n")
+            f.write(f"{cmd.linear.x:.4f},{cmd.linear.y:.4f},{cmd.linear.z:.4f},{cmd.angular.z:.4f}\n")
         self.cmd_pub.publish(cmd)
     def rand_point_callback(self, msg: Bool):
         self.rand_point_flag = msg

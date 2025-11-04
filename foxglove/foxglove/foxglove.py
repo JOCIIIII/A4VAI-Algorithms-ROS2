@@ -107,13 +107,22 @@ class FoxgloveNode(Node):
         self.filtered_points_np = np.array([])
         self.world_points_np = np.array([])
 
-        self.obstacle_info: Dict[int, ObstacleCluster] = {}
+        # Temporal accumulation for sparse structures (like ladders)
+        self.accumulated_points = []  # List of (points, timestamp)
+        self.accumulation_duration = 0.5  # seconds (누적할 시간 범위)
+        self.max_accumulated_frames = 10  # 최대 누적 프레임 수
 
+        self.obstacle_info: Dict[int, ObstacleCluster] = {}
 
         self.danger_distance_threshold = 10.0  # m
         self.warning_distance_threshold = 15.0  # m
         self.path_angle_threshold = np.deg2rad(24)  # 30도
         self.velocity_threshold = 5.0  # m/s (접근 속도)
+
+        # TTC (Time-to-Collision) parameters
+        self.ttc_threshold = 4.0  # seconds (TTC < 4초면 CA 진입)
+        self.path_width_threshold = 2.0  # m (경로 폭 - 이 거리 내면 경로 상으로 판단)
+        self.num_waypoints_to_check = 3  # 확인할 웨이포인트 개수
 
         # Collision Avoidance State Variables
         self.avoidance_required = False  # 회피가 필요한 상태
@@ -122,7 +131,7 @@ class FoxgloveNode(Node):
         self.previous_target_distance = None  # 이전 타겟 장애물 거리
         self.safe_distance_count = 0  # 안전 거리 유지 카운트 (회피 완료 판단용)
         self.safe_distance_threshold = 25.0  # m (회피 가능 거리 15m + 안전 마진 10m)
-        self.safe_count_required = 100  # 안전 상태 유지 횟수 (라이다 주기 * 100 = 약 2초)
+        self.safe_count_required = 10  # 안전 상태 유지 횟수 (10Hz 타이머 * 10 = 약 1초)
         self.safe_angle_threshold = np.deg2rad(90)  # 장애물이 측면/후방으로 벗어났는지 확인 (90도)
 
         # Hysteresis for obstacle flag (떨림 방지)
@@ -171,6 +180,9 @@ class FoxgloveNode(Node):
 
         # Waypoint visualization
         self.waypoint_marker_publisher_ = self.create_publisher(MarkerArray, "/waypoint_markers", self.qos_profile_default)
+
+        # Path corridor visualization (collision detection area)
+        self.path_corridor_publisher_ = self.create_publisher(MarkerArray, "/path_corridor", self.qos_profile_default)
         # endregion
 
 
@@ -642,6 +654,90 @@ class FoxgloveNode(Node):
             marker_array.markers.append(line_marker)
 
         self.waypoint_marker_publisher_.publish(marker_array)
+
+    def publish_path_corridor(self):
+        """Publish path corridor visualization (collision detection area)"""
+        if not self.waypoint_x or len(self.waypoint_x) == 0:
+            return
+
+        marker_array = MarkerArray()
+        drone_pos = self.vehicle_position_np
+
+        num_wp = min(self.num_waypoints_to_check, len(self.waypoint_x))
+
+        # 각 경로 세그먼트마다 실린더로 표시
+        for i in range(num_wp):
+            wp = np.array([
+                self.waypoint_x[i],
+                self.waypoint_y[i],
+                self.waypoint_z[i]
+            ])
+
+            # 드론 → 웨이포인트 세그먼트
+            start_pos = drone_pos if i == 0 else np.array([
+                self.waypoint_x[i - 1],
+                self.waypoint_y[i - 1],
+                self.waypoint_z[i - 1]
+            ])
+
+            # 세그먼트 중심점
+            center = (start_pos + wp) / 2.0
+            length = np.linalg.norm(wp - start_pos)
+
+            if length < 0.1:
+                continue
+
+            # 실린더 마커
+            cylinder = Marker()
+            cylinder.header.frame_id = "world"
+            cylinder.header.stamp = self.get_clock().now().to_msg()
+            cylinder.ns = "path_corridor"
+            cylinder.id = i
+            cylinder.type = Marker.CYLINDER
+            cylinder.action = Marker.ADD
+
+            # 위치 (세그먼트 중심)
+            cylinder.pose.position.x = float(center[0])
+            cylinder.pose.position.y = float(center[1])
+            cylinder.pose.position.z = float(center[2])
+
+            # 방향 (세그먼트를 따라 회전)
+            direction = wp - start_pos
+            direction = direction / np.linalg.norm(direction)
+
+            # Z축(위)을 세그먼트 방향으로 회전
+            z_axis = np.array([0, 0, 1])
+            rotation_axis = np.cross(z_axis, direction)
+            rotation_axis_norm = np.linalg.norm(rotation_axis)
+
+            if rotation_axis_norm > 1e-6:
+                rotation_axis = rotation_axis / rotation_axis_norm
+                angle = np.arccos(np.clip(np.dot(z_axis, direction), -1.0, 1.0))
+                from scipy.spatial.transform import Rotation as R
+                rot = R.from_rotvec(angle * rotation_axis)
+                quat = rot.as_quat()  # [x, y, z, w]
+                cylinder.pose.orientation.x = float(quat[0])
+                cylinder.pose.orientation.y = float(quat[1])
+                cylinder.pose.orientation.z = float(quat[2])
+                cylinder.pose.orientation.w = float(quat[3])
+            else:
+                cylinder.pose.orientation.w = 1.0
+
+            # 크기 (반경 = path_width_threshold, 높이 = 세그먼트 길이)
+            cylinder.scale.x = float(self.path_width_threshold * 2.0)  # 직경
+            cylinder.scale.y = float(self.path_width_threshold * 2.0)  # 직경
+            cylinder.scale.z = float(length)  # 높이
+
+            # 색상 (반투명 초록색)
+            cylinder.color.a = 0.2
+            cylinder.color.r = 0.0
+            cylinder.color.g = 1.0
+            cylinder.color.b = 0.0
+
+            cylinder.lifetime = Duration(seconds=0).to_msg()
+            marker_array.markers.append(cylinder)
+
+        self.path_corridor_publisher_.publish(marker_array)
     # endregion
 
 
@@ -656,6 +752,7 @@ class FoxgloveNode(Node):
         self.publish_cluster_points()
         self.publish_obstacle_info()
         self.publish_waypoint_markers()
+        self.publish_path_corridor()
 
     def process_lidar_points(self):
 
@@ -663,9 +760,33 @@ class FoxgloveNode(Node):
         self.filtered_points_np = self.preprocess_points()
 
         # transform point cloud to world frame
-        self.world_points_np = self.transform_pc_body_to_world(self.filtered_points_np)
+        current_world_points = self.transform_pc_body_to_world(self.filtered_points_np)
 
-        if len(self.world_points_np) > 0:
+        if len(current_world_points) > 0:
+            # Temporal accumulation for sparse structures
+            current_time = self.get_clock().now().nanoseconds / 1e9
+
+            # 현재 프레임 추가
+            self.accumulated_points.append((current_world_points, current_time))
+
+            # 오래된 프레임 제거 (시간 기준)
+            self.accumulated_points = [
+                (points, timestamp)
+                for points, timestamp in self.accumulated_points
+                if current_time - timestamp < self.accumulation_duration
+            ]
+
+            # 최대 프레임 수 제한
+            if len(self.accumulated_points) > self.max_accumulated_frames:
+                self.accumulated_points = self.accumulated_points[-self.max_accumulated_frames:]
+
+            # 모든 누적된 포인트 합치기
+            if len(self.accumulated_points) > 0:
+                all_accumulated = np.vstack([points for points, _ in self.accumulated_points])
+                # Voxel downsampling으로 중복 제거 (0.1m 격자)
+                self.world_points_np = self._voxel_downsample(all_accumulated, voxel_size=0.1)
+            else:
+                self.world_points_np = current_world_points
 
             self.extract_obstacle_info(self.world_points_np)
 
@@ -700,7 +821,7 @@ class FoxgloveNode(Node):
         z = points_np["z"]
 
         # Filter out points inside the vehicle
-        vehicle_radius = 0.01
+        vehicle_radius = 0.5
         distance_mask = np.sqrt((x)**2 + (y)**2 + (z)**2) > vehicle_radius
         forward_mask = x > 0.0
         ground_mask = z > 0.0
@@ -720,8 +841,10 @@ class FoxgloveNode(Node):
         points_np: numpy.ndarray
             shape: (n, 3)
         '''
-        # DBSCAN clustering
-        clustering = DBSCAN(eps=0.5, min_samples=3).fit(points_np)
+        # DBSCAN clustering (파라미터 조정: sparse 구조물 인식 개선)
+        # eps: 포인트 간 최대 거리 (0.5 → 0.8: 멀리 떨어진 포인트도 클러스터링)
+        # min_samples: 클러스터 형성 최소 포인트 수 (3 → 2: 적은 포인트로도 감지)
+        clustering = DBSCAN(eps=0.8, min_samples=2).fit(points_np)
         labels = clustering.labels_
         unique_labels = set(labels)
 
@@ -732,6 +855,10 @@ class FoxgloveNode(Node):
                 continue
 
             cluster_points_np = points_np[labels == label]
+
+            # 포인트가 너무 적으면 스킵 (PCA는 최소 3개 포인트 필요)
+            if len(cluster_points_np) < 3:
+                continue
 
             # PCA for bounding box
             pca = PCA(n_components=3)
@@ -787,8 +914,8 @@ class FoxgloveNode(Node):
             # 1. 거리 기반 위험도 판단
             obstacle_info.is_dangerous = self._is_distance_dangerous(obstacle_info)
 
-            # 2. 경로 상에 있는지 판단
-            obstacle_info.is_in_path = self._is_in_flight_path(obstacle_info)
+            # 2. 경로 상에 있는지 판단 (웨이포인트 고려)
+            obstacle_info.is_in_path = self._is_in_flight_path_with_waypoints(obstacle_info)
 
             # 3. 타겟 장애물 판단 (회피 대상)
             obstacle_info.is_target_obstacle = self._is_target_for_avoidance(obstacle_info)
@@ -831,8 +958,12 @@ class FoxgloveNode(Node):
 
         # 위험한 장애물이 존재하는 경우
         if not self.avoidance_required:
-            # 회피 중이 아닌 상태 → CA 진입 조건 확인
-            if most_dangerous.threat_level >= self.ca_entry_threat_level:
+            # 회피 중이 아닌 상태 → CA 진입 조건 확인 (TTC + 경로 기반)
+            ttc = self.calculate_ttc(most_dangerous)
+            is_in_path = self._is_in_flight_path_with_waypoints(most_dangerous)
+
+            # CA 진입 조건: TTC < 임계값 AND 경로 상에 있음
+            if ttc < self.ttc_threshold and is_in_path:
                 # 회피 시작
                 self.avoidance_required = True
                 self.avoidance_completed = False
@@ -840,76 +971,83 @@ class FoxgloveNode(Node):
                 self.target_obstacle_id = most_dangerous.cluster_id
                 self.previous_target_distance = most_dangerous.obstacle_distance
                 self.safe_distance_count = 0
+                self.get_logger().info(
+                    f"🚨 CA ENTRY: TTC={ttc:.2f}s < {self.ttc_threshold}s, "
+                    f"dist={most_dangerous.obstacle_distance:.2f}m, "
+                    f"in_path={is_in_path}"
+                )
         else:
-            # 회피 진행 중 → CA 종료 조건 확인 (히스테리시스)
-            if most_dangerous.threat_level <= self.ca_exit_threat_level:
-                # 위협 레벨이 종료 임계값 이하로 낮아짐
-                # 각도 조건: 장애물이 측면/후방으로 충분히 벗어났는지 확인
-                angle_diff = abs(most_dangerous.obstacle_rel_bearing)
-                is_obstacle_cleared = angle_diff > self.safe_angle_threshold  # 90도 이상 벗어남
+            # 회피 진행 중 → 타겟 장애물을 회피했는지 확인
+            # 타겟 장애물 찾기 (CA 진입 시 저장된 ID)
+            target_obstacle = None
+            if self.target_obstacle_id is not None:
+                target_obstacle = self.obstacle_info.get(self.target_obstacle_id)
 
-                # 거리 조건: 안전 거리 이상
-                is_distance_safe = most_dangerous.obstacle_distance >= self.safe_distance_threshold
+            # 타겟 장애물이 사라졌거나 찾을 수 없음
+            if target_obstacle is None:
+                self.safe_distance_count += 1
 
-                if is_distance_safe or is_obstacle_cleared:
-                    # 안전 거리 도달 OR 장애물이 측면/후방으로 벗어남
-                    self.safe_distance_count += 1
+                if self.safe_distance_count >= self.safe_count_required:
+                    # 타겟 장애물 사라짐 - 회피 완료
+                    self.avoidance_completed = True
+                    self.avoidance_required = False
+                    self.obstacle_flag = False
+                    self.get_logger().info(
+                        f"✅ CA COMPLETED - Target obstacle (ID:{self.target_obstacle_id}) disappeared"
+                    )
+                    self.target_obstacle_id = None
+                    self.previous_target_distance = None
+                return
 
-                    # 진행 상황 로깅 (10회마다)
-                    if self.safe_distance_count % 10 == 0:
-                        self.get_logger().info(
-                            f"CA exit progress: {self.safe_distance_count}/{self.safe_count_required} - "
-                            f"Dist: {most_dangerous.obstacle_distance:.1f}m (safe: {is_distance_safe}), "
-                            f"Bearing: {np.degrees(angle_diff):.0f}° (cleared: {is_obstacle_cleared})"
-                        )
+            # 타겟 장애물을 기준으로 회피 완료 판단
+            angle_diff = abs(target_obstacle.obstacle_rel_bearing)
+            is_obstacle_cleared = angle_diff > self.safe_angle_threshold  # 90도 이상 측면/후방
 
-                    if self.safe_distance_count >= self.safe_count_required:
-                        # 안전 조건 + 위협 레벨 낮음 + 일정 시간 유지 - 회피 완료
-                        self.avoidance_completed = True
-                        self.avoidance_required = False
-                        self.obstacle_flag = False
-                        self.target_obstacle_id = None
-                        self.previous_target_distance = None
-                        self.get_logger().info(
-                            f"✅ Collision avoidance COMPLETED - "
-                            f"Distance: {most_dangerous.obstacle_distance:.2f}m, "
-                            f"Bearing: {np.degrees(most_dangerous.obstacle_rel_bearing):.1f}°, "
-                            f"Threat level: {most_dangerous.threat_level}, "
-                            f"Safe count: {self.safe_distance_count}/{self.safe_count_required}"
-                        )
-                else:
-                    # 거리도 부족하고 각도도 부족 (여전히 전방에 있음)
-                    if self.safe_distance_count > 0:
-                        # 안전 카운트가 리셋되는 경우 로깅
-                        self.get_logger().info(
-                            f"⚠️ CA exit condition NOT met - Safe count reset! "
-                            f"Dist: {most_dangerous.obstacle_distance:.1f}m (need {self.safe_distance_threshold:.1f}m), "
-                            f"Bearing: {np.degrees(angle_diff):.0f}° (need {np.degrees(self.safe_angle_threshold):.0f}°)"
-                        )
-                    self.safe_distance_count = 0
+            # 거리 조건: 안전 거리 이상
+            is_distance_safe = target_obstacle.obstacle_distance >= self.safe_distance_threshold
+
+            if is_distance_safe or is_obstacle_cleared:
+                # 타겟 장애물을 회피함 (거리 OR 각도)
+                self.safe_distance_count += 1
+
+                # 진행 상황 로깅 (10회마다)
+                if self.safe_distance_count % 10 == 0:
+                    self.get_logger().info(
+                        f"CA exit progress: {self.safe_distance_count}/{self.safe_count_required} - "
+                        f"Target ID:{self.target_obstacle_id}, "
+                        f"Dist: {target_obstacle.obstacle_distance:.1f}m (safe: {is_distance_safe}), "
+                        f"Bearing: {np.degrees(angle_diff):.0f}° (cleared: {is_obstacle_cleared})"
+                    )
+
+                if self.safe_distance_count >= self.safe_count_required:
+                    # 타겟 장애물 회피 완료
+                    self.avoidance_completed = True
+                    self.avoidance_required = False
+                    self.obstacle_flag = False
+                    self.get_logger().info(
+                        f"✅ CA COMPLETED - Target obstacle avoided! "
+                        f"ID:{self.target_obstacle_id}, "
+                        f"Distance: {target_obstacle.obstacle_distance:.2f}m, "
+                        f"Bearing: {np.degrees(angle_diff):.1f}°"
+                    )
+                    self.target_obstacle_id = None
+                    self.previous_target_distance = None
             else:
-                # 여전히 위협적 - 카운트 리셋
+                # 타겟 장애물 여전히 전방에 있음 - 카운트 리셋
+                if self.safe_distance_count > 0:
+                    self.get_logger().info(
+                        f"⚠️ CA exit condition NOT met - Safe count reset! "
+                        f"Target ID:{self.target_obstacle_id}, "
+                        f"Dist: {target_obstacle.obstacle_distance:.1f}m (need {self.safe_distance_threshold:.1f}m), "
+                        f"Bearing: {np.degrees(angle_diff):.0f}° (need {np.degrees(self.safe_angle_threshold):.0f}°)"
+                    )
                 self.safe_distance_count = 0
-                self.previous_target_distance = most_dangerous.obstacle_distance
+                self.previous_target_distance = target_obstacle.obstacle_distance
 
     def _is_distance_dangerous(self, obstacle: ObstacleCluster) -> bool:
         """거리가 위험한 범위에 있는지 확인"""
         return obstacle.obstacle_distance < self.danger_distance_threshold
-    
-    def _is_in_flight_path(self, obstacle: ObstacleCluster) -> bool:
-        """장애물이 비행 경로 상에 있는지 확인"""
-        # obstacle.obstacle_rel_bearing은 이미 드론 정면 기준 상대 방위각
-        # (calculate_relative_bearing에서 heading_enu를 이미 뺌)
-        angle_diff = abs(obstacle.obstacle_rel_bearing)
 
-        # 진행 방향 전방 일정 각도 내에 있는지 확인
-        is_in_front = angle_diff < self.path_angle_threshold
-
-        # 거리가 충분히 가까운지도 확인
-        is_close_enough = obstacle.obstacle_distance < self.warning_distance_threshold
-
-        return is_in_front and is_close_enough
-    
     def _is_target_for_avoidance(self, obstacle: ObstacleCluster) -> bool:
         """회피 대상 장애물인지 판단"""
         # 조건 1: 위험 거리 이내
@@ -970,10 +1108,172 @@ class FoxgloveNode(Node):
         
         return most_dangerous
 
+    def calculate_ttc(self, obstacle: ObstacleCluster) -> float:
+        """
+        Time-to-Collision (TTC) 계산
+
+        Args:
+            obstacle: ObstacleCluster 객체
+
+        Returns:
+            TTC (seconds): 충돌까지 남은 시간
+                          - 접근 중이 아니면 float('inf')
+                          - 속도가 0이면 float('inf')
+        """
+        # 장애물 방향 벡터 (단위 벡터)
+        to_obstacle = obstacle.obstacle_position - self.vehicle_position_np
+        distance = np.linalg.norm(to_obstacle)
+
+        if distance < 1e-6:
+            return 0.0  # 이미 충돌
+
+        to_obstacle_unit = to_obstacle / distance
+
+        # 드론 속도를 장애물 방향으로 투영 (접근 속도)
+        # 양수: 장애물로 접근 중, 음수: 장애물에서 멀어지는 중
+        approach_velocity = np.dot(self.vehicle_velocity_np, to_obstacle_unit)
+
+        if approach_velocity <= 0.1:  # 0.1 m/s 이하면 접근 중이 아님
+            return float('inf')
+
+        # TTC = distance / approach_velocity
+        ttc = obstacle.obstacle_distance / approach_velocity
+
+        return ttc
+
+    def _is_in_flight_path_with_waypoints(self, obstacle: ObstacleCluster) -> bool:
+        """
+        웨이포인트를 고려하여 장애물이 비행 경로 상에 있는지 판단
+
+        Args:
+            obstacle: ObstacleCluster 객체
+
+        Returns:
+            bool: 경로 상에 있으면 True
+        """
+        # 웨이포인트가 없으면 기존 로직 사용 (heading 기반)
+        if not self.waypoint_x or len(self.waypoint_x) == 0:
+            return self._is_in_flight_path_simple(obstacle)
+
+        # 드론 위치
+        drone_pos = self.vehicle_position_np
+
+        # 다음 N개의 웨이포인트 확인
+        num_wp = min(self.num_waypoints_to_check, len(self.waypoint_x))
+
+        for i in range(num_wp):
+            # 웨이포인트 (ENU)
+            wp = np.array([
+                self.waypoint_x[i],
+                self.waypoint_y[i],
+                self.waypoint_z[i]
+            ])
+
+            # 드론 → 웨이포인트 선분과 장애물 사이의 최단 거리
+            distance_to_path = self._point_to_line_segment_distance(
+                obstacle.obstacle_position,
+                drone_pos,
+                wp
+            )
+
+            # 경로 폭 임계값 이내면 경로 상에 있다고 판단
+            if distance_to_path < self.path_width_threshold:
+                return True
+
+            # 다음 웨이포인트 세그먼트도 확인 (i → i+1)
+            if i < num_wp - 1:
+                next_wp = np.array([
+                    self.waypoint_x[i + 1],
+                    self.waypoint_y[i + 1],
+                    self.waypoint_z[i + 1]
+                ])
+
+                distance_to_segment = self._point_to_line_segment_distance(
+                    obstacle.obstacle_position,
+                    wp,
+                    next_wp
+                )
+
+                if distance_to_segment < self.path_width_threshold:
+                    return True
+
+        return False
+
+    def _is_in_flight_path_simple(self, obstacle: ObstacleCluster) -> bool:
+        """
+        단순 heading 기반 경로 판단 (기존 로직)
+
+        Args:
+            obstacle: ObstacleCluster 객체
+
+        Returns:
+            bool: 경로 상에 있으면 True
+        """
+        angle_diff = abs(obstacle.obstacle_rel_bearing)
+        is_in_front = angle_diff < self.path_angle_threshold
+        is_close_enough = obstacle.obstacle_distance < self.warning_distance_threshold
+        return is_in_front and is_close_enough
+
+    def _point_to_line_segment_distance(self, point: np.ndarray, line_start: np.ndarray, line_end: np.ndarray) -> float:
+        """
+        점과 선분 사이의 최단 거리 계산
+
+        Args:
+            point: 점 좌표 (3D)
+            line_start: 선분 시작점 (3D)
+            line_end: 선분 끝점 (3D)
+
+        Returns:
+            float: 최단 거리 (m)
+        """
+        # 선분 벡터
+        AB = line_end - line_start
+        AP = point - line_start
+
+        # 선분 길이의 제곱
+        AB_squared = np.dot(AB, AB)
+
+        if AB_squared < 1e-6:
+            # A == B인 경우 (선분이 점)
+            return np.linalg.norm(AP)
+
+        # Projection parameter (0 ~ 1 사이로 클립)
+        t = np.dot(AP, AB) / AB_squared
+        t = np.clip(t, 0.0, 1.0)
+
+        # 선분 상의 가장 가까운 점
+        closest_point = line_start + t * AB
+
+        # 거리
+        return np.linalg.norm(point - closest_point)
+
     # endregion
 
 
     # region: Utility Functions
+    def _voxel_downsample(self, points: np.ndarray, voxel_size: float) -> np.ndarray:
+        """
+        Voxel downsampling으로 포인트클라우드 밀도 감소 및 중복 제거
+
+        Args:
+            points: (N, 3) 포인트 배열
+            voxel_size: Voxel 크기 (m)
+
+        Returns:
+            (M, 3) Downsampled 포인트 배열
+        """
+        if len(points) == 0:
+            return points
+
+        # 각 포인트를 voxel 인덱스로 변환
+        voxel_indices = np.floor(points / voxel_size).astype(np.int32)
+
+        # 고유한 voxel 인덱스만 선택 (중복 제거)
+        _, unique_indices = np.unique(voxel_indices, axis=0, return_index=True)
+
+        # 각 voxel의 대표 포인트 반환
+        return points[unique_indices]
+
     # convert NED to ENU position
     def ned_to_enu(self, x_n, y_n, z_n):
         """

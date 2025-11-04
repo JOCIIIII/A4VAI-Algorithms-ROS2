@@ -68,8 +68,8 @@ private:
             double noise_intensity = std::normal_distribution<double>(mean, std_dev)(gen);
 
             point.x += noise_x;
-            point.y += noise_y;
-            point.z += noise_z;
+            point.y += -noise_y;
+            point.z += -noise_z;
             point.intensity += noise_intensity;
         }
     }

@@ -1,6 +1,7 @@
 import numpy as np
 from cv_bridge import CvBridge
-
+import rclpy
+from rclpy.clock import Clock
 class StateVariable:
     def __init__(self):
         # ned position [m]
@@ -15,21 +16,34 @@ class StateVariable:
         self.vx_b = 0.
         self.vy_b = 0.
         self.vz_b = 0.
-        # attitude [rad]
+        # attitude euler angle [rad]
         self.roll = 0.
         self.pitch = 0.
         self.yaw = 0.
-        
+        # attitude quaternion
+        self.q = [0., 0., 0., 0.]
+
+        # DCM matrix
         self.dcm_b2n = np.zeros((3, 3))
         self.dcm_n2b = np.zeros((3, 3))
         
 class CollisionAvoidanceVariable:
     def __init__(self):
+        self.clock = Clock()
         self.bridge = CvBridge()
         self.depth_min_distance = 0.
         self.lidar_min_distance = 0.
         self.lidar_counter = 0
         self.sign = 0.
+        self.time = self.clock.now()
+        # self.yaw_0 = 30*np.pi/180.
+        self.yaw_0 = -5*np.pi/180.
+
+        # Collision Avoidance Velocity Command Offset
+        self.vx_offset = -1.130069137
+        self.vy_offset = -0.08785345405340195
+        self.vz_offset = 0.39943796396255493
+        self.yawrate_offset = 0.13739442825317383
 
 class OffboardVariable:
     def __init__(self):
@@ -39,6 +53,7 @@ class OffboardVariable:
         self.period_offboard_control = 0.2     # required about 5Hz for attitude control (proof that the external controller is healthy
         self.period_offboard_att_ctrl = 0.004  # required 250Hz at least for attitude control
         self.period_offboard_vel_ctrl = 0.02
+        self.period_fusion_weight = 0.03
         self.pf_heartbeat = False
         self.pp_heartbeat = False
         self.ca_heartbeat = False
@@ -46,7 +61,7 @@ class OffboardVariable:
 
 class GuidVariable:
     def __init__(self):
-        self.init_pos = np.array([0., 0., 5.0])
+        self.init_pos = np.array([0., 0., 3.0])
         self.waypoint_x = []
         self.waypoint_y = []
         self.waypoint_z = []
@@ -58,22 +73,23 @@ class GuidVariable:
         
 
 class ModeStatus:
-    STANDBY = 0
-    TAKEOFF = 1
     def __init__(self):
-        self.DISARM         = True       # whether standby mode is activated
-        self.TAKEOFF         = False       # whether takeoff is done
-        self.path_planning         = False       # whether path planning mode is activated
-        self.pf_get_local_waypoint     = False     # whether local waypoint made by path planning is conveyed to path following
-        self.OFFBOARD        = False        # whether offboard mode is activated
-        self.pf_done            = False            # whether last waypoint is reached
-        self.LANDING          = False          # whether land mode is activated
-        self.is_disarmed        = False        # whether disarmed mode is activated
-        self.COLLISION_AVOIDANCE              = False
-        self.PATH_FOLLOWING              = False
-        self.foward_clear       = False
-        self.is_manual          = False
-             
+        self.DISARM                 = True
+        self.TAKEOFF                = False
+        self.OFFBOARD               = False
+        self.COLLISION_AVOIDANCE    = False
+        self.PATH_FOLLOWING         = False
+        self.LANDING                = False
+        self.is_disarmed            = False
+
+class Flags:
+    def __init__(self):
+        self.path_planning             = False
+        self.pf_get_local_waypoint  = False
+        self.pf_done                = False
+        self.obstacle_flag          = False
+        self.rand_point_flag        = False
+
 class SimulationVariable:
     def __init__(self, sim_name, dir):
         self.sim_name = sim_name
@@ -84,7 +100,7 @@ class SimulationVariable:
 class OffboardControlModeState:
     def __init__(self):
         self.position = False
-        self.velocity = False
+        self.velocity = True
         self.acceleration = False
         self.attitude = False
         self.body_rate = False
@@ -151,3 +167,9 @@ class VehicleVelocitySetpointState:
         self.yawspeed = np.nan
 
         self.body_velocity = np.nan * np.ones(3)
+
+        # Collision avoidance initial velocity (captured when CA starts)
+        self.ca_initial_vx = 0.0
+        self.ca_start_time = None  # CA 진입 시간 (ramping 용)
+        self.ca_ramp_duration = 1.5  # seconds (vx ramping 시간 - fusion weight와 동기화)
+        self.ca_ramp_delay = 0.0  # seconds (즉시 회피 - 중앙 장애물 대응)
