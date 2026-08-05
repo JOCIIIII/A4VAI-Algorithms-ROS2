@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>flight_manager</name>
+  <version>0.0.1</version>
+  <description>
+    RealGazebo용 비행 매니저. arm/offboard/takeoff/hover/land 시퀀스를 관리하고,
+    /pf_att_2_control(VehicleAttitudeSetpoint)을 받아
+    vehicle{system_id}/fmu/in/vehicle_attitude_setpoint 로 PX4에 포워딩한다.
+    웨이포인트는 직접 발행하지 않는다 — fast_planner + fastplanner_pf_bridge 가
+    /local_waypoint_setpoint_to_PF 를 공급한다. path_following_test 에서 wp 발행
+    로직만 제거한 버전 (path_following 자체 비행 인프라는 동일).
+    /controller_heartbeat 만 발행한다 (path_planning/collision_avoidance heartbeat 는
+    bridge 가 담당).
+  </description>
+  <maintainer email="kestrel@inha.edu">kestrel</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>px4_msgs</depend>
+  <depend>custom_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
