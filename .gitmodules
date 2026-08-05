@@ -6,7 +6,7 @@
 	url = https://github.com/JOCIIIII/A4VAI-TestCode.git
 [submodule "pathfollowing"]
 	path = pathfollowing
-	url = https://github.com/dailydi2/A4VAI-PathFollowing.git
+	url = https://github.com/lyj801/A4VAI-PathFollowing.git
 
 [submodule "ego-planner-a4vai"]
 	path = ego-planner-a4vai
