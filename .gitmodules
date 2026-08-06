@@ -1,13 +1,12 @@
-[submodule "pathplanning"]
-	path = pathplanning
-	url = https://github.com/Brightestsama/A4VAI-PathPlanning.git
-[submodule "algorithm_test"]
-	path = algorithm_test
-	url = https://github.com/JOCIIIII/A4VAI-TestCode.git
-[submodule "pathfollowing"]
-	path = pathfollowing
-	url = https://github.com/dailydi2/A4VAI-PathFollowing.git
-
-[submodule "ego-planner-a4vai"]
-	path = ego-planner-a4vai
-	url = https://github.com/swan9910/ego-planner-a4vai.git
+[submodule "A4VAI-PathFollowing"]
+	path = A4VAI-PathFollowing
+	url = https://github.com/JOCIIIII/A4VAI-PathFollowing.git
+	branch = inhousesim-v0.9
+[submodule "super"]
+	path = super
+	url = https://github.com/JOCIIIII/SUPER.git
+	branch = inhousesim-v0.9
+[submodule "px4_msgs"]
+	path = px4_msgs
+	url = https://github.com/PX4/px4_msgs.git
+	branch = release/1.16

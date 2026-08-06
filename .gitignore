@@ -1,11 +1,11 @@
-# pycache
-__pycache__
-log
-# result images
+# 빌드 산출물
+build/
+install/
+log/
+__pycache__/
+# 기존 항목
 pathplanning/pathplanning/Results_Images
 common_interfaces
-
 .vscode
-
 *.cache
-
+pathplanning/
