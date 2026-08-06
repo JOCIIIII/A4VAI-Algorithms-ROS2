@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>realgazebo_fastplanner_adapters</name>
+  <version>0.0.1</version>
+  <description>
+    RealGazebo(PX4/Gazebo) ↔ Fast-Planner(ROG-Map) 입력 어댑터 모음.
+    MARSIM 이 제공하던 /odom 과 /cloud 를 RealGazebo 센서/상태에서 합성한다.
+
+      px4_lidar_to_odom_cloud : PX4 상태(NED)+lidar 를 한 노드서 시간정합.
+                        vehicle_local_position(+attitude) → /odom (ENU/world) + TF,
+                        /vehicle{N}/scan/points → /cloud (world/ENU). cloud.stamp 시각의
+                        pose 를 odom 버퍼에서 보간(lerp+slerp)해 변환 — 이동 중 비동기 해결.
+      csv_goal_pub    : CSV 파일의 goal(x,y,z) → /waypoint_generator/waypoints (nav_msgs/Path)
+  </description>
+  <maintainer email="kestrel@inha.edu">kestrel</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>px4_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_sensor_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
