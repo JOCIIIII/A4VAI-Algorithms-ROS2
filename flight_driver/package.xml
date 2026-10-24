@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>flight_driver</name>
+  <version>0.1.0</version>
+  <description>
+    Real-vehicle flight FSM for the A4VAI apps (from A4VAI-Flight-Test path_following_test, flown on the
+    X500): PX4 AUTO_TAKEOFF relative to the ground the vehicle rests on, OFFBOARD in the air, PathFollowing
+    attitude forwarded to PX4, landing. Missions: local or GPS waypoints for PathFollowing, or a goal for
+    the learned collision avoidance. Yields to the pilot, never re-arms, lands on lost inputs.
+  </description>
+  <maintainer email="jociiiii@inha.edu">JOCIIIII</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>px4_msgs</depend>
+  <depend>custom_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

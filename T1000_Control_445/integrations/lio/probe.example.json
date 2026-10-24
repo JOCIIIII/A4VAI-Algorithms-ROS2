@@ -1,0 +1,25 @@
+{
+  "pointcloud": {
+    "fields": [
+      {"name": "x", "offset": 0, "datatype": 7},
+      {"name": "y", "offset": 4, "datatype": 7},
+      {"name": "z", "offset": 8, "datatype": 7},
+      {"name": "intensity", "offset": 12, "datatype": 7},
+      {"name": "tag", "offset": 16, "datatype": 2},
+      {"name": "line", "offset": 17, "datatype": 2},
+      {"name": "timestamp", "offset": 18, "datatype": 8}
+    ],
+    "header_stamp_s": 100.0,
+    "point_timestamp_semantics": "absolute_ns",
+    "point_timestamp_min_ns": 100000000000.0,
+    "point_timestamp_max_ns": 100099000000.0
+  },
+  "odometry": {
+    "frame_id": "camera_init",
+    "child_frame_id": "body",
+    "rate_hz": 10.0,
+    "mean_sample_age_s": 0.027,
+    "min_sample_age_s": 0.010,
+    "max_sample_age_s": 0.065
+  }
+}

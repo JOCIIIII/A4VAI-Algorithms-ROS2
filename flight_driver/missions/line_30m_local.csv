@@ -1,0 +1,4 @@
+x,y,z
+# north, east, height above the take-off point [m]
+0.0, 0.0, 5.0
+30.0, 0.0, 5.0

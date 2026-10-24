@@ -33,7 +33,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy,
                        qos_profile_sensor_data)
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 
 from mars_quadrotor_msgs.msg import PolynomialTrajectory
 from custom_msgs.msg import LocalWaypointSetpoint
@@ -50,11 +50,26 @@ class PolyToWaypoints(Node):
         # piece 당 다항식 샘플 수(평가 밀도). 호길이 재샘플 전 dense 곡선용.
         self.samples_per_piece = int(self.declare_parameter("samples_per_piece", 20).value)
 
-        # ---- 아래 throttle/skip-ahead/QoS 는 traj_to_waypoints.py 와 동일 (플래너-중립) ----
-        self.goal_eps = float(self.declare_parameter("republish_goal_eps", 10.0).value)
-        self.start_eps = float(self.declare_parameter("republish_start_eps", 1.0).value)
+        # ---- 아래 skip-ahead/QoS 는 traj_to_waypoints.py 와 동일 (플래너-중립) ----
+        # Replan throttle (forward only if the path start moved >= start_eps or its end
+        # >= goal_eps). Off by default (0 = forward every replan): PathFollowing now
+        # re-localizes onto a live path update instead of resetting its indices, and the
+        # throttle was dropping most SUPER replans - including the ones that bend the path
+        # around a newly seen obstacle - leaving the follower on a stale path beside it.
+        self.goal_eps = float(self.declare_parameter("republish_goal_eps", 0.0).value)
+        self.start_eps = float(self.declare_parameter("republish_start_eps", 0.0).value)
         self.last_goal = None
         self.last_start = None
+        self.n_forward = 0
+        self.last_log_t = 0.0
+        # SUPER's committed trajectory starts at the replan point (now + replan_forward_dt),
+        # i.e. v * forward_dt AHEAD of the vehicle. Forwarded as-is, every replan moved the
+        # path start ahead of the follower; a follower that fell slightly behind went into
+        # its off-path mode and chased that start point in a straight line (v10g: 15 m).
+        # Splice: prepend the previous path from the vehicle up to where the new trajectory
+        # branches off it, so the forwarded path always begins at the vehicle.
+        self.splice_tol = float(self.declare_parameter("splice_tol_m", 0.6).value)
+        self.prev_dense = None
 
         self.skip_ahead = float(self.declare_parameter("skip_ahead_m", 1.5).value)
         self.drone_enu = None
@@ -67,7 +82,10 @@ class PolyToWaypoints(Node):
         #   해결: 최종 goal(/planning/click_goal)에 아직 안 닿았으면 wp 끝점을 진행방향으로
         #   연장(extend_ahead_m)해 드론이 마지막 wp 에 못 닿게 → PF done 안 남. goal 근처
         #   (final_goal_tol_m 안)면 연장 안 함 → 정상 done→착륙.
-        self.final_goal_tol = float(self.declare_parameter("final_goal_tol_m", 3.0).value)
+        # 1 m: a trajectory that stops further than this from the final goal (e.g. a SUPER
+        # backup/stop trajectory 2.4 m short, s7i) is not the arrival - extend it so PF does
+        # not declare done and land there; SUPER replans to the goal from the hover.
+        self.final_goal_tol = float(self.declare_parameter("final_goal_tol_m", 1.0).value)
         self.extend_ahead = float(self.declare_parameter("extend_ahead_m", 8.0).value)
         self.final_goal_enu = None
         goal_qos = QoSProfile(
@@ -102,6 +120,49 @@ class PolyToWaypoints(Node):
         self.last_wp_msg = None
         self.repub_period = float(self.declare_parameter("wp_repub_period", 1.0).value)
         self.create_timer(self.repub_period, self._republish_wp)
+
+        # Speed profile hand-off: the waypoint list carries geometry only, so the
+        # follower would fly SUPER's path at a fixed speed and ignore where SUPER
+        # planned to slow down (turns, obstacles, end of the safe horizon). Publish
+        # the planned speed speed_lead_s ahead of the vehicle's closest point on the
+        # latest trajectory as /desired_speed (PathFollowing pos_speed_mode).
+        self.publish_speed = bool(self.declare_parameter("publish_speed", True).value)
+        self.speed_lead = float(self.declare_parameter("speed_lead_s", 0.5).value)
+        self.speed_max = float(self.declare_parameter("speed_max", 10.0).value)
+        self.speed_min = float(self.declare_parameter("speed_min", 0.0).value)
+        self.traj_t = self.traj_p = self.traj_v = None
+        # Keep the follower on SUPER's time schedule. SUPER replans from its OWN committed
+        # trajectory (state at now + replan_forward_dt), assuming the vehicle tracks it in
+        # time. A path follower that drifts ahead/behind makes every replan start away from
+        # the vehicle (v10h: new path began behind it -> full-brake turn-back). Speed command
+        # = planned speed at the scheduled point + sync_gain * (scheduled - actual) arc length.
+        self.sync_gain = float(self.declare_parameter("schedule_sync_gain", 1.0).value)
+        # Final-goal approach: cap the speed at sqrt(2 * goal_brake_accel * distance to the
+        # final goal). At 7 m/s SUPER's last replans could not fit a stop at the goal and it
+        # flew its backup past it (s7b, 13 m overshoot + 55 s of circling); arriving slower
+        # gives those replans room. 0 disables.
+        self.goal_brake = float(self.declare_parameter("goal_brake_accel", 2.0).value)
+        # Final approach: within arrive_radius of the final goal, stop forwarding SUPER's
+        # replans and hand PF a fixed 2-point path [vehicle -> goal] at <= arrive_speed.
+        # Near the goal SUPER kept replanning past and around it (s7p: 14 m past, then 20 m
+        # back west) and the vehicle never settled; PF declares done at the end of this
+        # path (stopped, within final_wp_tolerance) and the flight manager lands. 0 = off.
+        self.arrive_radius = float(self.declare_parameter("arrive_radius_m", 1.5).value)
+        # Fixed flight height: every waypoint handed to PF gets this ENU z (PX4 local frame);
+        # NaN = SUPER's own z. SUPER's corridor band cannot be narrower than its inflation
+        # quantisation allows (0.3 m steps x 3 on each side), so in C-Track at 1.5 m it planned
+        # 1.5-2.1 m above ground while dodging poles (ctrack_123_q median 1.74 m). All obstacles
+        # there are taller than the flight band, so avoidance is lateral and holding the height
+        # keeps SUPER's lateral clearance.
+        self.hold_z = float(self.declare_parameter("hold_z", float("nan")).value)
+        self.arrive_speed = float(self.declare_parameter("arrive_speed", 0.5).value)
+        self.arriving = False
+        self.traj_s = None
+        self.traj_start_wt = None
+        self.speed_pub = self.create_publisher(Float32, "/desired_speed", 10)
+        if self.publish_speed:
+            self.create_timer(1.0 / float(self.declare_parameter("speed_rate_hz", 20.0).value),
+                              self._speed_tick)
         self.get_logger().info(
             f"[super_pf_bridge] up. frame={self.frame} spacing={self.spacing}m "
             f"max_wp={self.max_wp}")
@@ -118,6 +179,28 @@ class PolyToWaypoints(Node):
         if self.last_wp_msg is not None:
             self.wp_pub.publish(self.last_wp_msg)
 
+    def _check_arrival(self):
+        # latch the final approach once the vehicle is within arrive_radius of the goal
+        if (self.arriving or self.arrive_radius <= 0.0 or self.final_goal_enu is None
+                or self.drone_enu is None):
+            return self.arriving
+        if float(np.linalg.norm(self.final_goal_enu - self.drone_enu)) > self.arrive_radius:
+            return False
+        self.arriving = True
+        pts = self._held(np.vstack([self.drone_enu, self.final_goal_enu]))
+        wp = self.enu_to_ned(pts) if self.frame == "ned" else pts
+        out = LocalWaypointSetpoint()
+        out.path_planning_complete = True
+        out.waypoint_x = wp[:, 0].tolist()
+        out.waypoint_y = wp[:, 1].tolist()
+        out.waypoint_z = wp[:, 2].tolist()
+        self.wp_pub.publish(out)
+        self.last_wp_msg = out
+        self.get_logger().info(
+            f"[super_pf_bridge] final approach: {np.linalg.norm(self.final_goal_enu - self.drone_enu):.2f} m "
+            f"to goal, fixed path to it at <= {self.arrive_speed} m/s (SUPER replans ignored)")
+        return True
+
     def heartbeat(self):
         m = Bool(); m.data = True
         self.pp_hb.publish(m)
@@ -126,6 +209,14 @@ class PolyToWaypoints(Node):
     # ---- ENU (planner, z-up) -> PathFollowing external-waypoint convention. ----
     # (traj_to_waypoints.py 와 동일: PF build_waypoints(wp_type=0)가 z 를 내부에서
     #  부호반전하므로 altitude(+ENU.z)를 그대로 넘긴다.)
+    def _held(self, pts):
+        """pts with z = hold_z when a fixed flight height is set"""
+        if not np.isfinite(self.hold_z):
+            return pts
+        pts = np.array(pts, dtype=float)
+        pts[:, 2] = self.hold_z
+        return pts
+
     @staticmethod
     def enu_to_ned(p):
         out = np.empty_like(p)
@@ -178,14 +269,88 @@ class PolyToWaypoints(Node):
             pts.append(np.stack([px, py, pz], axis=1))
         return np.concatenate(pts, axis=0) if pts else np.empty((0, 3))
 
+    def _eval_minco_timed(self, msg: PolynomialTrajectory):
+        # Same descending-coefficient convention as _eval_minco_dense, plus the
+        # trajectory time and speed of every sample.
+        ncoef = int(msg.order_pos) + 1
+        cx = np.array(msg.coef_pos_x, dtype=float)
+        cy = np.array(msg.coef_pos_y, dtype=float)
+        cz = np.array(msg.coef_pos_z, dtype=float)
+        durs = np.array(msg.time_pos, dtype=float)
+        ts, ps, vs = [], [], []
+        t0 = 0.0
+        for i in range(int(msg.piece_num_pos)):
+            sl = slice(ncoef * i, ncoef * i + ncoef)
+            taus = np.linspace(0.0, float(durs[i]), max(2, self.samples_per_piece),
+                               endpoint=(i == int(msg.piece_num_pos) - 1))
+            c = (cx[sl], cy[sl], cz[sl])
+            ps.append(np.stack([np.polyval(ci, taus) for ci in c], axis=1))
+            vel = np.stack([np.polyval(np.polyder(ci), taus) for ci in c], axis=1)
+            vs.append(np.linalg.norm(vel, axis=1))
+            ts.append(t0 + taus)
+            t0 += float(durs[i])
+        return np.concatenate(ts), np.concatenate(ps), np.concatenate(vs)
+
+    def _speed_tick(self):
+        if self._check_arrival():
+            m = Float32()
+            m.data = float(self.arrive_speed)
+            self.speed_pub.publish(m)
+            return
+        if self.traj_t is None or self.drone_enu is None:
+            return
+        i = int(np.argmin(np.linalg.norm(self.traj_p - self.drone_enu, axis=1)))
+        t_q = self.traj_t[i] + self.speed_lead
+        s_err = 0.0
+        if self.sync_gain > 0.0 and self.traj_start_wt is not None:
+            t_sched = self.get_clock().now().nanoseconds * 1e-9 - self.traj_start_wt
+            t_sched = min(max(t_sched, 0.0), float(self.traj_t[-1]))
+            s_err = float(np.interp(t_sched, self.traj_t, self.traj_s)) - float(self.traj_s[i])
+            t_q = t_sched + self.speed_lead
+        # beyond the committed trajectory SUPER has not cleared anything: stop there
+        # (s_err still closes a gap to the trajectory end, which is cleared)
+        v = 0.0 if t_q > self.traj_t[-1] else float(np.interp(t_q, self.traj_t, self.traj_v))
+        v += self.sync_gain * s_err
+        if self.goal_brake > 0.0 and self.final_goal_enu is not None:
+            d_goal = float(np.linalg.norm(self.final_goal_enu - self.drone_enu))
+            v = min(v, max(np.sqrt(2.0 * self.goal_brake * d_goal), 0.5))
+        m = Float32()
+        m.data = float(min(max(v, self.speed_min), self.speed_max))
+        self.speed_pub.publish(m)
+
+    def _splice_previous(self, dense):
+        prev, self.prev_dense = self.prev_dense, dense
+        if prev is None or self.drone_enu is None or len(prev) < 2:
+            return dense
+        i_d = int(np.argmin(np.linalg.norm(prev - self.drone_enu, axis=1)))
+        gap = np.linalg.norm(prev - dense[0], axis=1)
+        i_s = int(np.argmin(gap))
+        # only when the new trajectory starts on the old one, ahead of the vehicle
+        if gap[i_s] > self.splice_tol or i_s <= i_d:
+            return dense
+        out = np.vstack([prev[i_d:i_s], dense])
+        self.prev_dense = out
+        return out
+
     def poly_cb(self, msg: PolynomialTrajectory):
         # POSITION_TRAJ 비트가 없으면(HEART_BEAT 등) 위치궤적이 아니므로 무시.
         if not (int(msg.type) & PolynomialTrajectory.POSITION_TRAJ):
             return
+        if self.arriving:
+            return
+        if self.publish_speed:
+            try:
+                self.traj_t, self.traj_p, self.traj_v = self._eval_minco_timed(msg)
+                self.traj_s = np.concatenate(
+                    [[0.0], np.cumsum(np.linalg.norm(np.diff(self.traj_p, axis=0), axis=1))])
+                self.traj_start_wt = float(msg.start_wt_pos)
+            except Exception as e:  # noqa: BLE001
+                self.get_logger().warn(f"minco speed eval failed: {e}")
         try:
             dense = self._eval_minco_dense(msg)
             if len(dense) < 2:
                 return
+            dense = self._splice_previous(dense)
             pts = self.resample_by_arclen(dense, self.spacing)
         except Exception as e:  # noqa: BLE001
             self.get_logger().warn(f"minco parse failed: {e}")
@@ -232,12 +397,20 @@ class PolyToWaypoints(Node):
                 #   마지막 구간이 살짝 하강이면 기울기 외삽은 지하로 향하고, PF 가 그걸
                 #   추종해 고도가 낮아지면 SUPER 가 낮아진 위치에서 재계획 → 하강 스파이럴.
                 #   goal 방향 연장은 처짐을 goal 고도로 되돌리는 음성 피드백이 된다.
+                # Two extension points, not one: PF declares done when it gets within
+                #   final_wp_tolerance of the SECOND-TO-LAST waypoint while heading for the
+                #   last one, so with a single point the trajectory end itself was that
+                #   waypoint and a vehicle stopping there (SUPER stop/backup trajectory)
+                #   landed mid-mission. /desired_speed is 0 beyond the trajectory end, so
+                #   the vehicle holds at the end instead of flying the extension.
                 d = self.final_goal_enu - pts[-1]
                 nrm = float(np.linalg.norm(d))
                 if nrm > 1e-6:
-                    ext = pts[-1] + (d / nrm) * min(self.extend_ahead, end_to_goal)
+                    ext_len = min(self.extend_ahead, end_to_goal)
+                    ext = pts[-1] + (d / nrm) * np.array([[0.5 * ext_len], [ext_len]])
                     pts = np.vstack([pts, ext])
 
+        pts = self._held(pts)
         wp = self.enu_to_ned(pts) if self.frame == "ned" else pts
         out = LocalWaypointSetpoint()
         out.path_planning_complete = True
@@ -247,14 +420,18 @@ class PolyToWaypoints(Node):
         self.wp_pub.publish(out)
         self.last_wp_msg = out
 
+        self.n_forward += 1
         if not self.have_path:
             self.have_path = True
             self.get_logger().info(
                 f"[super_pf_bridge] first path: {len(wp)} waypoints, frame={self.frame}")
         else:
-            self.get_logger().info(
-                f"[super_pf_bridge] wp updated -> {len(wp)} waypoints "
-                f"(goal>={self.goal_eps}m or start>={self.start_eps}m moved)")
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self.last_log_t >= 2.0:
+                self.last_log_t = now
+                self.get_logger().info(
+                    f"[super_pf_bridge] wp updated -> {len(wp)} waypoints "
+                    f"({self.n_forward} paths forwarded)")
 
 
 def main():
