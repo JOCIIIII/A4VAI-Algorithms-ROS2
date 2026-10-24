@@ -1,0 +1,21 @@
+{
+  "fast_lio_ros2": {
+    "repository": "https://github.com/Ericsii/FAST_LIO_ROS2.git",
+    "ref": "2fffc570a25d0df172720bac034fbdb6a13d2162",
+    "branch_at_verification": "ros2",
+    "patch": "patches/fastlio_mid360_point_timestamp.patch",
+    "patch_check": "PASS"
+  },
+  "livox_ros_driver2": {
+    "repository": "https://github.com/Livox-SDK/livox_ros_driver2.git",
+    "commit": "21445540f0d100dc86a7e6df312dd70bbdb4afdf",
+    "required_interface": "PointCloud2 x,y,z,intensity,tag,line,timestamp",
+    "timestamp_semantics": "PointCloud2 timestamp is absolute ns; CustomMsg offset_time is scan-relative ns",
+    "evidence": [
+      "src/comm/pub_handler.cpp: point.offset_time = pkt.time_stamp + i * pkt.point_interval",
+      "src/lddc.cpp: PointCloud2 copies offset_time unchanged; CustomMsg subtracts pkg.base_time"
+    ],
+    "source_check": "PASS"
+  },
+  "verified_at": "2026-09-30"
+}

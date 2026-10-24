@@ -79,6 +79,11 @@ class CsvGoalPub(Node):
         # goal_repub_period 마다 현재 goal 을 다시 쏴서 확실히 전달한다. 같은 goal
         # 재발행은 fast_planner replan 만 유발하며 bridge throttle 이 wp 중복을 막는다.
         self.repub_period = float(self.declare_parameter('goal_repub_period', 2.0).value)
+        # >0: stop after this many publishes of the same goal. SUPER re-snaps every goal
+        # it receives to the nearest free inflated cell, so a mid-flight republish can
+        # move the goal (z 5.0 <-> 5.9 seen) and re-trigger planning; 0 = keep going.
+        self.repub_count = int(self.declare_parameter('goal_repub_count', 0).value)
+        self.n_pub = 0
         self.kicked = False
         self.create_timer(self.repub_period, self._republish_current_goal)
         if self.publish_period > 0.0:
@@ -129,6 +134,7 @@ class CsvGoalPub(Node):
         xyz = self.goals[self.idx]
         self.cur_xyz = xyz
         self._publish_goal(xyz)
+        self.n_pub = 1   # new goal: restart the republish budget
         self.get_logger().info(
             f'[csv_goal_pub] goal[{self.idx}] = ({xyz[0]:.1f},{xyz[1]:.1f},{xyz[2]:.1f})')
 
@@ -137,6 +143,9 @@ class CsvGoalPub(Node):
         # 모든 goal 도달 후엔 더 발행 안 함.
         if self.idx >= len(self.goals):
             return
+        if self.repub_count > 0 and self.n_pub >= self.repub_count:
+            return
+        self.n_pub += 1
         xyz = self.goals[self.idx]
         self.cur_xyz = xyz
         self._publish_goal(xyz)

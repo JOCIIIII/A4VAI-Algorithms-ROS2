@@ -1,11 +1,11 @@
 [submodule "A4VAI-PathFollowing"]
 	path = A4VAI-PathFollowing
 	url = https://github.com/JOCIIIII/A4VAI-PathFollowing.git
-	branch = inhousesim-v0.9
+	branch = inhousesim-v1.0
 [submodule "super"]
 	path = super
 	url = https://github.com/JOCIIIII/SUPER.git
-	branch = inhousesim-v0.9
+	branch = inhousesim-v1.0
 [submodule "px4_msgs"]
 	path = px4_msgs
 	url = https://github.com/PX4/px4_msgs.git
