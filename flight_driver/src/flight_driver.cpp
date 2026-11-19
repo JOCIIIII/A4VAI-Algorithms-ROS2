@@ -13,6 +13,15 @@
 //             OFFBOARD the goal (goal_north_m / goal_east_m from the take-off point, or goal_lat / goal_lon)
 //             goes to the policy node on goal_topic (PointStamped, PX4 local ENU, z = path height); the node
 //             makes the path; within goal_handover_radius_m PX4 position control stops at the goal, then lands.
+//             Legs (/flight_driver/mission, before arming; wait_mission: no arming without one): String
+//             "north,east,hold_s;..." metres from the take-off point - at each goal it holds hold_s (the leg is
+//             announced on /flight_driver/leg, "arrived i/N" - e.g. the camera), then the next goal goes to the
+//             policy; it lands after the last. hold_s -1: a pass-through point (search patterns) - the next goal
+//             goes to the policy within leg_pass_radius_m, without stopping ("passed i/N").
+//             Pause (Bool true on /flight_driver/pause, while following): PX4 position control holds where the
+//             vehicle is until false (or max_pause_s) - e.g. to look at something; then the leg goes on. While
+//             paused, /flight_driver/hold_at (PointStamped, ENU metres from the take-off point like the legs, z
+//             ignored; at most 15 m away) moves the hold point (a better view).
 //
 // Safety, beyond path_following_test:
 //   - arms once: a disarm after that (kill switch, PX4) ends the run; it never re-arms
@@ -153,6 +162,9 @@ public:
         goal_pf_done_max_ = declare_parameter<double>("goal_pf_done_max_m", 0.0);
         // arming gate
         require_go_ = declare_parameter<bool>("require_go", true);
+        wait_mission_ = declare_parameter<bool>("wait_mission", false);
+        leg_pass_radius_ = declare_parameter<double>("leg_pass_radius_m", 3.0);
+        max_pause_s_ = declare_parameter<double>("max_pause_s", 120.0);
         ekf_settle_s_ = declare_parameter<double>("ekf_settle_s", 30.0);
         max_mission_radius_ = declare_parameter<double>("max_mission_radius_m", 300.0);
         min_wp_alt_ = declare_parameter<double>("min_wp_alt_m", 1.0);
@@ -192,6 +204,7 @@ public:
         speed_pub_ = create_publisher<std_msgs::msg::Float32>("/desired_speed", qos);
         goal_pub_ = create_publisher<geometry_msgs::msg::PointStamped>(goal_topic_, qos);
         state_pub_ = create_publisher<std_msgs::msg::String>("/flight_driver/state", qos);
+        leg_pub_ = create_publisher<std_msgs::msg::String>("/flight_driver/leg", qos);
         ctrl_hb_pub_ = create_publisher<std_msgs::msg::Bool>("/controller_heartbeat", qos);
         pp_hb_pub_ = create_publisher<std_msgs::msg::Bool>("/path_planning_heartbeat", qos);
         ca_hb_pub_ = create_publisher<std_msgs::msg::Bool>("/collision_avoidance_heartbeat", qos);
@@ -210,7 +223,10 @@ public:
             [this](const px4_msgs::msg::VehicleAttitudeSetpoint::SharedPtr m) { pf_att_cb(*m); });
         pf_done_sub_ = create_subscription<std_msgs::msg::Bool>("/path_following_complete", qos,
             [this](const std_msgs::msg::Bool::SharedPtr m) {
-                if (m->data && !pf_done_ && (phase_ == Phase::FOLLOW || phase_ == Phase::GOAL)) {
+                // after a leg switch PathFollowing still reports the previous leg's finished path until the
+                // policy's new one reaches it: ignored for 3 s
+                if (m->data && !pf_done_ && (phase_ == Phase::FOLLOW || phase_ == Phase::GOAL) &&
+                    now_s() >= t_pf_done_ignore_) {
                     pf_done_ = true;
                     RCLCPP_INFO(get_logger(), "/path_following_complete received");
                 }
@@ -242,6 +258,23 @@ public:
                     abort_flight("operator: /flight_driver/land");
                 }
             });
+        if (mission_ == "ca") {
+            mission_sub_ = create_subscription<std_msgs::msg::String>("/flight_driver/mission", qos,
+                [this](const std_msgs::msg::String::SharedPtr m) { on_mission(m->data); });
+            pause_sub_ = create_subscription<std_msgs::msg::Bool>("/flight_driver/pause", qos,
+                [this](const std_msgs::msg::Bool::SharedPtr m) { on_pause(m->data); });
+            hold_at_sub_ = create_subscription<geometry_msgs::msg::PointStamped>("/flight_driver/hold_at", qos,
+                [this](const geometry_msgs::msg::PointStamped::SharedPtr m) {
+                    if (!paused_) return;
+                    const double n = home_n_ + m->point.y, e = home_e_ + m->point.x;   // ENU from home -> NED
+                    if (std::hypot(n - lpos_.x, e - lpos_.y) > 15.0) {
+                        RCLCPP_WARN(get_logger(), "hold_at %.1f m away ignored (> 15 m)", std::hypot(n - lpos_.x, e - lpos_.y));
+                        return;
+                    }
+                    hover_ = {n, e, hover_[2]};
+                    RCLCPP_INFO(get_logger(), "holding at N %.2f E %.2f instead", n - home_n_, e - home_e_);
+                });
+        }
 
         timer_ = create_wall_timer(100ms, std::bind(&FlightDriver::tick, this));
         hb_timer_ = create_wall_timer(1000ms, std::bind(&FlightDriver::heartbeats, this));
@@ -510,6 +543,7 @@ private:
         }
         if (t - t_pf_hb_ > 2.5) miss.push_back("PathFollowing heartbeat");
         if (!ready_topic_.empty() && t - t_ready_ > 2.5) miss.push_back(ready_topic_);
+        if (wait_mission_ && legs_.empty()) miss.push_back("a mission on /flight_driver/mission");
         std::string s;
         for (size_t i = 0; i < miss.size(); ++i) s += (i ? ", " : "") + miss[i];
         return s;
@@ -528,6 +562,16 @@ private:
             if (std::hypot(n - home_n, e - home_e) < 5.0) {
                 err = "the goal is " + fmt(std::hypot(n - home_n, e - home_e)) + " m from the take-off point (< 5 m)";
                 return false;
+            }
+            for (size_t i = 1; i < legs_.size(); ++i) {
+                const std::array<double, 3> g{home_n + legs_[i].north, home_e + legs_[i].east, ground_z - takeoff_alt_};
+                const auto & q = mission_ned_.back();
+                if (std::hypot(g[0] - q[0], g[1] - q[1]) < 5.0) {
+                    err = "leg " + std::to_string(i + 1) + " is " + fmt(std::hypot(g[0] - q[0], g[1] - q[1])) +
+                          " m from the previous goal (< 5 m)";
+                    return false;
+                }
+                mission_ned_.push_back(g);
             }
         } else {
             for (const auto & w : wp_) {
@@ -847,6 +891,15 @@ private:
 
     void follow(double t)
     {
+        if (paused_) {
+            if (t - t_pause_ > max_pause_s_) {
+                RCLCPP_WARN(get_logger(), "paused for %.0f s (max_pause_s) - going on", t - t_pause_);
+                on_pause(false);
+            } else {
+                send_setpoint(hover_[0], hover_[1], hover_[2], hold_yaw_);
+                return;
+            }
+        }
         const bool pf_fresh = t_pf_att_ > t_follow_ && t - t_pf_att_ < pf_timeout_s_;
         if (use_attitude_ && !pf_fresh) {
             abort_flight("PathFollowing silent for " + fmt(t - t_pf_att_) + " s");
@@ -869,6 +922,13 @@ private:
                 return;
             }
             const double d = std::hypot(goal_ned_[0] - lpos_.x, goal_ned_[1] - lpos_.y);
+            if (leg_idx_ + 1 < legs_.size() && legs_[leg_idx_].hold_s < 0.0 && d < leg_pass_radius_) {
+                std_msgs::msg::String m;
+                m.data = "passed " + std::to_string(leg_idx_ + 1) + "/" + std::to_string(legs_.size());
+                leg_pub_->publish(m);
+                next_leg(t, true);
+                return;
+            }
             if (goal_handover_ > 0.0 && d < goal_handover_) {
                 goal_yaw_ = lpos_.heading;
                 set_phase(Phase::GOAL, fmt(d) + " m from the goal: PX4 position control to it");
@@ -894,9 +954,131 @@ private:
         const double v = std::sqrt(lpos_.vx * lpos_.vx + lpos_.vy * lpos_.vy + lpos_.vz * lpos_.vz);
         settle_ticks_ = (d < goal_settle_radius_ && v < goal_settle_speed_) ? settle_ticks_ + 1 : 0;
         const bool timeout = t - t_phase_ > goal_timeout_s_;
-        if (settle_ticks_ >= static_cast<int>(std::lround(goal_settle_s_ * 10.0)) || timeout) {
-            start_landing(std::string(timeout ? "goal approach timed out" : "at the goal") + " (" + fmt(d) + " m, " +
-                          fmt(v) + " m/s)");
+        if (timeout && t_hold_ < 0.0) {
+            start_landing("goal approach timed out (" + fmt(d) + " m, " + fmt(v) + " m/s)");
+            return;
+        }
+        if (t_hold_ < 0.0 && settle_ticks_ >= static_cast<int>(std::lround(goal_settle_s_ * 10.0))) {
+            t_hold_ = t;
+            const size_t n = std::max<size_t>(legs_.size(), 1);
+            std_msgs::msg::String m;
+            m.data = "arrived " + std::to_string(leg_idx_ + 1) + "/" + std::to_string(n);
+            leg_pub_->publish(m);
+            RCLCPP_INFO(get_logger(), "at goal %zu/%zu (%.2f m, %.2f m/s)%s", leg_idx_ + 1, n, d, v,
+                        leg_hold() > 0.0 ? (" - holding " + fmt(leg_hold()) + " s").c_str() : "");
+            // a stop goal with a next leg: turn to face it while holding, so the policy (and the lidar) start
+            // the leg looking down it (2026-11-05: starting WP2 -> WP3 still facing north clipped pole C1 twice)
+            if (leg_idx_ + 1 < legs_.size() && leg_hold() > 0.0) {
+                const double nn = home_n_ + legs_[leg_idx_ + 1].north, ne = home_e_ + legs_[leg_idx_ + 1].east;
+                goal_yaw_ = std::atan2(ne - lpos_.y, nn - lpos_.x);
+                RCLCPP_INFO(get_logger(), "turning to face leg %zu: yaw %.0f deg", leg_idx_ + 2,
+                            goal_yaw_ * 180.0 / M_PI);
+            }
+        }
+        if (t_hold_ < 0.0 || t - t_hold_ < leg_hold()) return;
+        if (leg_idx_ + 1 < legs_.size() && leg_hold() > 0.0) {
+            // wait for the turn (within 10 deg), at most 8 s
+            const double miss = std::fabs(std::remainder(lpos_.heading - goal_yaw_, 2.0 * M_PI));
+            if (miss > 10.0 * M_PI / 180.0 && t - t_hold_ < leg_hold() + 8.0) return;
+        }
+        if (leg_idx_ + 1 < legs_.size()) {
+            next_leg(t);
+        } else {
+            start_landing("at the goal (" + fmt(d) + " m, " + fmt(v) + " m/s)");
+        }
+    }
+
+    double leg_hold() const { return leg_idx_ < legs_.size() ? legs_[leg_idx_].hold_s : 0.0; }
+
+    // the next leg: hover here until PathFollowing flies the policy's path to the next goal (a pass-through point:
+    // PathFollowing keeps flying, the policy re-plans to the next goal)
+    void next_leg(double t, bool passing = false)
+    {
+        ++leg_idx_;
+        hover_ = {lpos_.x, lpos_.y, goal_ned_[2]};
+        if (passing) {
+            goal_ned_ = {home_n_ + legs_[leg_idx_].north, home_e_ + legs_[leg_idx_].east, goal_ned_[2]};
+            pf_done_ = false;
+            t_pf_done_ignore_ = t + 3.0;
+            publish_goal();
+            RCLCPP_INFO(get_logger(), "leg %zu/%zu (through): N %.2f E %.2f (%.2f m away)", leg_idx_ + 1, legs_.size(),
+                        legs_[leg_idx_].north, legs_[leg_idx_].east,
+                        std::hypot(goal_ned_[0] - lpos_.x, goal_ned_[1] - lpos_.y));
+            return;
+        }
+        goal_ned_ = {home_n_ + legs_[leg_idx_].north, home_e_ + legs_[leg_idx_].east, goal_ned_[2]};
+        pf_done_ = false;
+        t_pf_done_ignore_ = t + 3.0;
+        settle_ticks_ = 0;
+        t_hold_ = -1.0;
+        t_follow_ = t;
+        publish_goal();
+        set_phase(Phase::FOLLOW, "leg " + std::to_string(leg_idx_ + 1) + "/" + std::to_string(legs_.size()) +
+                  ": N " + fmt(legs_[leg_idx_].north) + " E " + fmt(legs_[leg_idx_].east) + " (" +
+                  fmt(std::hypot(goal_ned_[0] - lpos_.x, goal_ned_[1] - lpos_.y)) + " m away)");
+    }
+
+    // "north,east,hold_s;..." (metres from the take-off point): accepted until arming; replaces goal_north/east_m
+    void on_mission(const std::string & text)
+    {
+        if (phase_ != Phase::INIT && phase_ != Phase::PREFLIGHT && phase_ != Phase::WAIT_GO) {
+            RCLCPP_WARN(get_logger(), "mission ignored in %s (only before arming): %s", phase_name(phase_), text.c_str());
+            return;
+        }
+        std::vector<Leg> legs;
+        std::stringstream all(text);
+        std::string item;
+        while (std::getline(all, item, ';')) {
+            if (item.find_first_not_of(" \t") == std::string::npos) continue;
+            Leg l{};
+            char c1 = 0, c2 = 0;
+            std::stringstream one(item);
+            if (!(one >> l.north >> c1 >> l.east >> c2 >> l.hold_s) || c1 != ',' || c2 != ',' ||
+                !std::isfinite(l.north) || !std::isfinite(l.east) || l.hold_s < -1.0 || l.hold_s > 120.0) {
+                RCLCPP_ERROR(get_logger(), "mission rejected: bad leg '%s' (north,east,hold_s)", item.c_str());
+                return;
+            }
+            legs.push_back(l);
+        }
+        if (legs.empty() || legs.size() > 40) {
+            RCLCPP_ERROR(get_logger(), "mission rejected: %zu legs (1-40)", legs.size());
+            return;
+        }
+        legs_ = legs;
+        leg_idx_ = 0;
+        goal_north_ = legs_[0].north;
+        goal_east_ = legs_[0].east;
+        std::ostringstream m;
+        for (size_t i = 0; i < legs_.size(); ++i) {
+            m << (i ? "; " : "") << "N " << fmt(legs_[i].north) << " E " << fmt(legs_[i].east);
+            if (legs_[i].hold_s > 0.0) m << " hold " << fmt(legs_[i].hold_s) << " s";
+            if (legs_[i].hold_s < 0.0) m << " (through)";
+        }
+        RCLCPP_INFO(get_logger(), "mission: %zu legs from the take-off point: %s", legs_.size(), m.str().c_str());
+        if (phase_ == Phase::WAIT_GO) {
+            go_ = false;
+            set_phase(Phase::PREFLIGHT, "new mission - checking it again");
+        }
+    }
+
+    // hold where the vehicle is (true) / go on with the leg (false); only while following a leg
+    void on_pause(bool on)
+    {
+        if (on && !paused_) {
+            if (phase_ != Phase::FOLLOW) {
+                RCLCPP_WARN(get_logger(), "pause ignored in %s", phase_name(phase_));
+                return;
+            }
+            paused_ = true;
+            t_pause_ = now_s();
+            hover_ = {lpos_.x, lpos_.y, goal_ned_[2]};
+            hold_yaw_ = lpos_.heading;
+            use_attitude_ = false;
+            RCLCPP_INFO(get_logger(), "paused at N %.2f E %.2f (PX4 position control)", lpos_.x - home_n_, lpos_.y - home_e_);
+        } else if (!on && paused_) {
+            paused_ = false;
+            t_follow_ = now_s();            // PathFollowing flies again once its next attitude arrives
+            RCLCPP_INFO(get_logger(), "resumed after %.1f s", now_s() - t_pause_);
         }
     }
 
@@ -918,6 +1100,8 @@ private:
               << " speed=" << fmt(std::hypot(lpos_.vx, lpos_.vy));
         }
         if (mission_ == "ca" && goal_sent_) s << " to_goal=" << fmt(std::hypot(goal_ned_[0] - lpos_.x, goal_ned_[1] - lpos_.y));
+        if (!legs_.empty()) s << " leg=" << (leg_idx_ + 1) << "/" << legs_.size() << (t_hold_ >= 0.0 ? " holding=1" : "");
+        if (paused_) s << " paused=1";
         s << " pf_age=" << fmt(t_pf_att_ > 0 ? now_s() - t_pf_att_ : -1.0) << " forwarded=" << forwarded_;
         if (!reason_.empty()) s << " reason=\"" << reason_ << "\"";
         if (phase_ == Phase::PREFLIGHT) s << " waiting=\"" << readiness(now_s()) << "\"";
@@ -971,7 +1155,7 @@ private:
     double goal_north_{0.0}, goal_east_{0.0}, goal_lat_{0.0}, goal_lon_{0.0};
     double goal_handover_{3.0}, goal_settle_radius_{0.3}, goal_settle_speed_{0.3}, goal_settle_s_{1.0};
     double goal_timeout_s_{20.0}, goal_pf_done_max_{0.0};
-    bool require_go_{true}, needs_gps_{false}, abort_on_dead_reckoning_{true};
+    bool require_go_{true}, needs_gps_{false}, abort_on_dead_reckoning_{true}, wait_mission_{false};
     double ekf_settle_s_{30.0}, max_mission_radius_{300.0}, min_wp_alt_{1.0};
     double pf_timeout_s_{0.5}, pf_start_timeout_s_{20.0}, wp_timeout_s_{0.0};
     double fence_margin_{20.0}, fence_alt_margin_{10.0}, speed_limit_{0.0};
@@ -980,6 +1164,12 @@ private:
 
     // mission
     std::vector<Wp> wp_;
+    struct Leg { double north, east, hold_s; };
+    std::vector<Leg> legs_;
+    size_t leg_idx_{0};
+    double t_hold_{-1.0}, t_pf_done_ignore_{0.0}, t_pause_{0.0}, hold_yaw_{0.0};
+    double leg_pass_radius_{3.0}, max_pause_s_{120.0};
+    bool paused_{false};
     std::vector<std::array<double, 3>> mission_ned_;
     std::array<double, 3> goal_ned_{0.0, 0.0, 0.0};
     std::array<double, 3> hover_{0.0, 0.0, 0.0};
@@ -1015,7 +1205,10 @@ private:
     rclcpp::Publisher<custom_msgs::msg::LocalWaypointSetpoint>::SharedPtr wp_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr speed_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr goal_pub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_, leg_pub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr hold_at_sub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ctrl_hb_pub_, pp_hb_pub_, ca_hb_pub_;
     rclcpp::Subscription<VehicleStatus>::SharedPtr status_sub_;
     rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr lpos_sub_;
