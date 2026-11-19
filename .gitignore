@@ -3,9 +3,6 @@ build/
 install/
 log/
 __pycache__/
-# 기존 항목
-pathplanning/pathplanning/Results_Images
-common_interfaces
+# 편집기·캐시
 .vscode
 *.cache
-pathplanning/
