@@ -150,8 +150,8 @@ class PolyToWaypoints(Node):
         self.arrive_radius = float(self.declare_parameter("arrive_radius_m", 1.5).value)
         # Fixed flight height: every waypoint handed to PF gets this ENU z (PX4 local frame);
         # NaN = SUPER's own z. SUPER's corridor band cannot be narrower than its inflation
-        # quantisation allows (0.3 m steps x 3 on each side), so in C-Track at 1.5 m it planned
-        # 1.5-2.1 m above ground while dodging poles (ctrack_123_q median 1.74 m). All obstacles
+        # quantisation allows (0.3 m steps x 3 on each side), so on the test map at 1.5 m it planned
+        # 1.5-2.1 m above ground while dodging poles (run 123_q median 1.74 m). All obstacles
         # there are taller than the flight band, so avoidance is lateral and holding the height
         # keeps SUPER's lateral clearance.
         self.hold_z = float(self.declare_parameter("hold_z", float("nan")).value)

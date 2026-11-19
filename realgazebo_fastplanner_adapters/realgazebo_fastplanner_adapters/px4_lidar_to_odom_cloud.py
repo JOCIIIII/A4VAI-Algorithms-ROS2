@@ -175,20 +175,20 @@ class Px4LidarToOdomCloud(Node):
         # sweep; AirSim registration with de-skew only) are dropped. The mirrored AirSim pose
         # is a frame or two off the scan, so in a hard brake (1-2 rad/s) the ground 10-15 m
         # out was registered ~1 m up: phantom obstacles at 0.7-0.9 m AGL that SUPER parked
-        # next to and could not plan out of for 190 s (ctrack_123_j). Normal flight exceeds
+        # next to and could not plan out of for 190 s (run 123_j). Normal flight exceeds
         # 0.8 rad/s 1-2 % of the time. 0 = off.
         self.max_tilt_rate = float(self.declare_parameter('max_tilt_rate', 0.0).value)
         self._n_tilt_drop = 0
         # gated_topic (optional): every scan still goes to /cloud, and only the scans that pass the
         # tilt gate also go here - a consumer that needs every scan (super_speed_guard.py tracks
-        # moving objects; gaps restarted the RC cart's track, ctrack_s900_c) reads /cloud and
+        # moving objects; gaps restarted the RC cart's track, run s900_c) reads /cloud and
         # passes this one on to the planner. '' = tilting scans are dropped from /cloud itself.
         self.gated_topic = str(self.declare_parameter('gated_topic', '').value)
         # publish_empty_scans: a scan with no returns goes out as an empty cloud instead of being
         # skipped, so the consumer knows the lidar saw nothing rather than keeping its last scan
         # and, with a watchdog, taking the silence for a dead lidar. A 10 m lidar (the CA policy's
         # range) 1.5 m up sees no ground and, between obstacles, nothing at all: /cloud fell silent
-        # for 2.7 s and the policy node held twice (ctrack_big_h). Off by default (SUPER as flown).
+        # for 2.7 s and the policy node held twice (run big_h). Off by default (SUPER as flown).
         self.publish_empty = bool(self.declare_parameter('publish_empty_scans', False).value)
         self._tilting = False
         self._last_scan_stamp = None

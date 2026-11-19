@@ -76,15 +76,15 @@ public:
         this->declare_parameter<double>("goal_timeout_s", 20.0);
         // PF done 은 목표에서 이 수평거리 안일 때만 도착으로 본다. 더 멀면 그 자리 착륙.
         // 플래너가 막혀 PF 가 경로 끝에서 멈춘 것이라 PX4 위치제어로 목표까지 직진하면 장애물을
-        // 무시하고 최대속도로 날아간다(ctrack_123_d: 42 m 앞에서 PF done → 11.5 m/s 로 풍선 충돌·전복).
+        // 무시하고 최대속도로 날아간다(run 123_d: 42 m 앞에서 PF done → 11.5 m/s 로 풍선 충돌·전복).
         this->declare_parameter<double>("goal_pf_done_max_m", 6.0);
         // 비행 중 PX4 위치 추정이 이 거리 이상 리셋되면(EKF 가 GPS 로 재정렬) 그 자리 착륙. 리셋 전
-        // 추정으로 쌓은 플래너 맵·경로는 쓸 수 없다(ctrack_123_d: 충돌 스핀 뒤 65 m 리셋). 0 = 끔.
+        // 추정으로 쌓은 플래너 맵·경로는 쓸 수 없다(run 123_d: 충돌 스핀 뒤 65 m 리셋). 0 = 끔.
         this->declare_parameter<double>("abort_xy_reset_m", 3.0);
         // 충돌 감지: 착륙 명령 전 비행 중 IMU 가속도 크기가 impact_accel_m_s2 를 impact_window_s 안에
         // impact_samples 번 넘으면 그 자리 착륙. 충돌 후 PX4 추정이 몇 초 뒤부터 어긋나는데
-        // dead_reckoning 표시는 6 s 뒤에야 떠서 그사이 80 m 를 날아갔다(ctrack_123_h). 정상 비행
-        // 최대 11-13 m/s^2(ctrack_123_e/f/g, sp_c/d 착륙 명령 전), 충돌 130-260 m/s^2 가 160-220 ms.
+        // dead_reckoning 표시는 6 s 뒤에야 떠서 그사이 80 m 를 날아갔다(run 123_h). 정상 비행
+        // 최대 11-13 m/s^2(run 123_e/f/g, sp_c/d 착륙 명령 전), 충돌 130-260 m/s^2 가 160-220 ms.
         // 수신 주기와 무관하게 창 안 표본 수로 센다. 0 = 끔.
         this->declare_parameter<double>("impact_accel_m_s2", 30.0);
         this->declare_parameter<int>("impact_samples", 2);
@@ -431,7 +431,7 @@ private:
         // disarm 은 X8 처럼 내려오는 데 더 걸리면 공중에서 거부됐다 - 그때까지 기다리고, 60초가
         // 지나도 무장 상태면 disarm 을 한 번 보낸다(공중이면 PX4 가 거부).
         // NAV_LAND goes out once over uXRCE-DDS (UDP): when that one message was lost PX4 kept holding
-        // the goal, the vehicle hovered 60 s and the disarm below was refused in the air (ctrack_tau7_1).
+        // the goal, the vehicle hovered 60 s and the disarm below was refused in the air (run tau7_1).
         // Resend it every second until PX4 is in AUTO_LAND.
         if (!disarmed_ && land_tick_ >= 0 && is_armed && tick_count_ > land_tick_ &&
             (tick_count_ - land_tick_) % 10 == 0 &&
