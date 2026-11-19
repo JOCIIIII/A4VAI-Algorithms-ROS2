@@ -150,7 +150,7 @@ public:
         goal_lat_ = declare_parameter<double>("goal_lat", 0.0);
         goal_lon_ = declare_parameter<double>("goal_lon", 0.0);
         goal_topic_ = declare_parameter<std::string>("goal_topic", "/flight_driver/goal");
-        ready_topic_ = declare_parameter<std::string>("ready_topic", mission_ == "ca" ? "/noclimb/ready" : "");
+        ready_topic_ = declare_parameter<std::string>("ready_topic", mission_ == "ca" ? "/collision_avoidance/ready" : "");
         goal_handover_ = declare_parameter<double>("goal_handover_radius_m", 3.0);
         goal_settle_radius_ = declare_parameter<double>("goal_settle_radius_m", 0.3);
         goal_settle_speed_ = declare_parameter<double>("goal_settle_speed", 0.3);
